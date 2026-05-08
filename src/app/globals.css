@@ -1,0 +1,94 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* LIGHT (default) — terinspirasi referensi: soft blue-white bg + putih bersih untuk card */
+    --bg: 245 247 251;
+    --bg-elev: 255 255 255;
+    --bg-card: 255 255 255;
+    --border: 229 231 240;
+    --border-strong: 203 209 224;
+    --fg: 17 24 39;
+    --fg-muted: 100 116 139;
+    --accent: 124 92 255;
+    --accent-hover: 106 74 242;
+    --accent-ink: 255 255 255;
+    color-scheme: light;
+  }
+
+  html.dark {
+    --bg: 10 10 11;
+    --bg-elev: 17 17 20;
+    --bg-card: 22 22 26;
+    --border: 31 31 36;
+    --border-strong: 42 42 49;
+    --fg: 232 232 236;
+    --fg-muted: 139 139 150;
+    --accent: 124 92 255;
+    --accent-hover: 138 110 255;
+    --accent-ink: 255 255 255;
+    color-scheme: dark;
+  }
+
+  html,
+  body {
+    background: rgb(var(--bg));
+    color: rgb(var(--fg));
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    font-family: Inter, system-ui, -apple-system, sans-serif;
+  }
+  ::selection {
+    background: rgb(var(--accent) / 0.25);
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium
+           transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn text-accent-ink;
+    background: rgb(var(--accent));
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: rgb(var(--accent-hover));
+  }
+  .btn-secondary {
+    @apply btn bg-bg-card border border-border hover:border-border-strong text-fg;
+  }
+  .btn-ghost {
+    @apply btn text-muted hover:text-fg hover:bg-bg-elev;
+  }
+  .btn-danger {
+    @apply btn bg-red-600 text-white hover:bg-red-700;
+  }
+  .input {
+    @apply w-full bg-bg-elev border border-border rounded-md px-3 py-2 text-sm
+           text-fg placeholder:text-muted/70
+           focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/20;
+  }
+  .card {
+    @apply bg-bg-card border border-border rounded-xl shadow-card;
+  }
+  .badge {
+    @apply inline-flex items-center px-2 py-0.5 text-xs rounded-full font-medium;
+  }
+  .kbd {
+    @apply inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono
+           bg-bg-elev border border-border-strong rounded text-muted;
+  }
+}
+
+/* Status pills — work in both themes */
+.status-pending  { background: rgb(234 179 8 / 0.12);   color: rgb(180 130 0); border: 1px solid rgb(234 179 8 / 0.25); }
+.status-proses   { background: rgb(59 130 246 / 0.12);  color: rgb(37 99 235);  border: 1px solid rgb(59 130 246 / 0.25); }
+.status-selesai  { background: rgb(16 185 129 / 0.12);  color: rgb(5 150 105);  border: 1px solid rgb(16 185 129 / 0.25); }
+
+html.dark .status-pending { color: rgb(250 204 21); }
+html.dark .status-proses  { color: rgb(96 165 250); }
+html.dark .status-selesai { color: rgb(52 211 153); }
