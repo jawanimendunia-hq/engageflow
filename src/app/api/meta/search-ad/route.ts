@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { loadMetaCreds } from "@/lib/meta-creds";
 import { searchAdsBulk } from "@/lib/meta";
 
+export const maxDuration = 60;
+
 /**
  * GET /api/meta/search-ad?cred_id=xxx&q=keyword1&q=keyword2
  */

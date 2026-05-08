@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { loadMetaCreds } from "@/lib/meta-creds";
 import { getAdsInCampaign } from "@/lib/meta";
 
+export const maxDuration = 60;
+
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const credId = searchParams.get("cred_id");

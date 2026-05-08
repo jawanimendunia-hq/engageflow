@@ -99,8 +99,8 @@ async function callPaginated(
   let nextUrl: string | null = `${BASE}${path}?${initialQs.toString()}`;
   let pages = 0;
   while (nextUrl && pages < maxPages) {
-    const res = await fetch(nextUrl, { method: "GET" });
-    const data = await res.json();
+    const res: Response = await fetch(nextUrl, { method: "GET" });
+    const data: any = await res.json();
     if (!res.ok) throw new MetaApiError(res.status, data);
     if (Array.isArray(data.data)) out.push(...data.data);
     nextUrl = data?.paging?.next ?? null;

@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { loadMetaCreds } from "@/lib/meta-creds";
 import { searchCampaignsBulk } from "@/lib/meta";
 
+// Pagination Meta API bisa banyak halaman, kasih budget 60s
+export const maxDuration = 60;
+
 /**
  * GET /api/meta/search-campaign?cred_id=xxx&q=keyword1&q=keyword2
  * Mendukung multi keyword (q bisa berkali-kali).

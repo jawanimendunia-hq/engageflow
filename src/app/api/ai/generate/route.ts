@@ -2,9 +2,13 @@ import { NextResponse } from "next/server";
 import { loadAiCreds } from "@/lib/ai-creds";
 import { generateComments, GeminiRateLimitError } from "@/lib/gemini";
 
+// Vercel: izinkan request sampai 60 detik karena Gemini bisa
+// retry beberapa kali kalau "high demand" (3s + 7s + 15s = 25s + waktu generate)
+export const maxDuration = 60;
+
 /**
  * POST /api/ai/generate
- * Body: { url, kategori, count, ad_name?, campaign_name? }
+ * Body: { url, kategori, count, ad_name?, campaign_name?, primary_text?, headline?, description? }
  * Response: { comments: [{ isi, tone }] } | { error, retry_after_sec? }
  */
 export async function POST(req: Request) {
