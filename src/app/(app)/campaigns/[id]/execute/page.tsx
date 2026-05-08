@@ -61,13 +61,20 @@ export default async function ExecutePage({
     const comMap: Map<string, { id: string; isi: string; tone: string }> = new Map(
       (comsRes.data ?? []).map((c) => [c.id, c])
     );
-    const linkMap: Map<string, { id: string; url: string; kategori: string }> =
-      new Map(
-        (links ?? []).map((l: any) => [
-          l.id,
-          { id: l.id, url: l.url, kategori: l.kategori },
-        ])
-      );
+    const linkMap: Map<
+      string,
+      { id: string; url: string; kategori: string; status: string }
+    > = new Map(
+      (links ?? []).map((l: any) => [
+        l.id,
+        {
+          id: l.id,
+          url: l.url,
+          kategori: l.kategori,
+          status: l.status,
+        },
+      ])
+    );
 
     enriched = (asg ?? []).map((a) => {
       const link = linkMap.get(a.link_id);
