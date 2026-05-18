@@ -19,7 +19,6 @@ import {
 import { cn } from "@/lib/utils";
 import { detectKategoriFromSku, type MetaSearchResult } from "@/lib/meta";
 import { createClient } from "@/lib/supabase/client";
-import { buildAssignments } from "@/lib/assignment";
 import type { Account } from "@/lib/types";
 
 interface Sku {
@@ -320,13 +319,6 @@ export default function MetaImportModal({
     let commentsTotal = 0;
     let failed = 0;
 
-    // Snapshot usage map untuk balancing antar link selama proses
-    const { data: usageRows } = await supabase
-      .from("comment_usage")
-      .select("comment_id, jumlah_pakai");
-    const usageMap = new Map<string, number>();
-    for (const u of usageRows ?? []) usageMap.set(u.comment_id, u.jumlah_pakai);
-
     // Sequential processing
     for (let i = 0; i < rows.length; i++) {
       if (cancelled) break;
@@ -407,70 +399,42 @@ export default function MetaImportModal({
         if (cancelled) break;
 
         if (generated.length === 0) {
-          throw new Error("Gemini tidak mengembalikan komentar");
+          throw new Error("AI tidak mengembalikan komentar");
         }
 
-        // 3) Insert komentar baru ke pool
-        updateProgress(ad.ad_id, { status: "saving-comments" });
-        const {
-          data: { user },
-        } = await supabase.auth.getUser();
-        if (!user) throw new Error("Sesi habis");
-
-        const commentRows = generated.map((c) => ({
-          user_id: user.id,
-          isi: c.isi,
-          kategori,
-          tone: c.tone,
-        }));
-        const { data: insertedComments, error: comErr } = await supabase
-          .from("comments")
-          .insert(commentRows)
-          .select();
-        if (comErr || !insertedComments) {
-          throw new Error(comErr?.message ?? "Gagal insert komentar");
-        }
-
-        // 4) Run buildAssignments hanya untuk link ini, dengan komentar baru saja
+        // 3) Assignment inline — komentar TIDAK disimpan ke table `comments`
+        // supaya hemat storage Supabase. Komentar disimpan langsung di
+        // assignments.comment_text + comment_tone.
         updateProgress(ad.ad_id, { status: "assigning" });
-        const result = buildAssignments({
-          links: [linkRow],
-          accounts,
-          comments: insertedComments,
-          usage: usageMap,
-          perLink: perLinkCount,
-        });
 
-        if (result.assignments.length > 0) {
-          const insertRows = result.assignments.map((a) => ({
-            link_id: a.link_id,
-            account_id: a.account_id,
-            comment_id: a.comment_id,
-            urutan: a.urutan,
-          }));
+        // Pasangkan 1:1 akun ↔ komentar (acak urutan akun untuk variasi)
+        const shuffledAccs = [...accounts]
+          .sort(() => Math.random() - 0.5)
+          .slice(0, generated.length);
+
+        const assignmentRows = shuffledAccs.map((acc, idx) => ({
+          link_id: linkRow.id,
+          account_id: acc.id,
+          comment_id: null,
+          comment_text: generated[idx].isi,
+          comment_tone: generated[idx].tone,
+          urutan: idx,
+        }));
+
+        if (assignmentRows.length > 0) {
           const { error: aErr } = await supabase
             .from("assignments")
-            .insert(insertRows);
+            .insert(assignmentRows);
           if (aErr) throw new Error(`Insert assignment: ${aErr.message}`);
-
-          const upserts = Array.from(result.updatedUsage.entries()).map(
-            ([comment_id, jumlah_pakai]) => ({ comment_id, jumlah_pakai })
-          );
-          if (upserts.length > 0) {
-            await supabase
-              .from("comment_usage")
-              .upsert(upserts, { onConflict: "comment_id" });
-            for (const [k, v] of result.updatedUsage) usageMap.set(k, v);
-          }
         }
 
         updateProgress(ad.ad_id, {
           status: "done",
-          comments_count: generated.length,
+          comments_count: assignmentRows.length,
           used_provider: usedProvider,
         });
         linksOk++;
-        commentsTotal += generated.length;
+        commentsTotal += assignmentRows.length;
 
         // 5) Throttle ringan 1.5s antar request — dengan 3 provider rotasi
         // (effective ~75 RPM kombinasi), tidak perlu wait lama

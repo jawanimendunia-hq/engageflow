@@ -54,12 +54,16 @@ export async function GET(
 
   const linkIds = (links ?? []).map((l) => l.id);
 
-  // Fetch semua assignment + relasi comment + account dalam satu query
+  // Fetch semua assignment + relasi comment + account dalam satu query.
+  // comment_text & comment_tone diisi untuk assignment hasil AI inline;
+  // FK comment dipakai untuk assignment manual yang merujuk table comments.
   let assignments: Array<{
     id: string;
     link_id: string;
     urutan: number;
     status: string;
+    comment_text: string | null;
+    comment_tone: string | null;
     comment: { isi: string; tone: string } | null;
     account: { nama: string } | null;
   }> = [];
@@ -73,6 +77,8 @@ export async function GET(
         link_id,
         urutan,
         status,
+        comment_text,
+        comment_tone,
         comment:comments(isi, tone),
         account:accounts(nama)
         `
@@ -89,10 +95,16 @@ export async function GET(
       link_id: a.link_id,
       urutan: a.urutan,
       status: a.status,
+      comment_text: a.comment_text ?? null,
+      comment_tone: a.comment_tone ?? null,
       comment: Array.isArray(a.comment) ? a.comment[0] : a.comment,
       account: Array.isArray(a.account) ? a.account[0] : a.account,
     }));
   }
+
+  // Helper: resolve isi komentar (inline duluan, fallback ke FK)
+  const resolveComment = (a: (typeof assignments)[number]): string =>
+    a.comment_text ?? a.comment?.isi ?? "(komentar terhapus)";
 
   // Group assignment per link, urut by urutan
   const asgByLink = new Map<string, typeof assignments>();
@@ -126,7 +138,8 @@ export async function GET(
       l.status,
     ];
     for (let i = 0; i < maxKomentar; i++) {
-      row.push(asgs[i]?.comment?.isi ?? "");
+      const a = asgs[i];
+      row.push(a ? resolveComment(a) : "");
     }
     return row;
   });
@@ -162,7 +175,7 @@ export async function GET(
         l.url,
         l.kategori,
         a.account?.nama ?? "(akun terhapus)",
-        a.comment?.isi ?? "(komentar terhapus)",
+        resolveComment(a),
         a.status,
       ]);
     }

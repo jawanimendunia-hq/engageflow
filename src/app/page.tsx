@@ -2,6 +2,7 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { ThemeToggle } from "@/components/ThemeProvider";
+import { Logo } from "@/components/Logo";
 
 export default async function Home() {
   const supabase = createClient();
@@ -28,6 +29,7 @@ export default async function Home() {
 
       <div className="min-h-screen flex items-center justify-center px-6 py-16">
         <div className="max-w-2xl">
+          <Logo size={88} className="text-fg mb-6" />
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full
                           border border-border bg-bg-card text-xs text-muted mb-6 shadow-card">
             <span className="size-1.5 rounded-full bg-emerald-500" />

@@ -23,7 +23,8 @@ export interface EnrichedAssignment {
   id: string;
   link_id: string;
   account_id: string;
-  comment_id: string;
+  /** Null jika komentar disimpan inline (hasil AI Meta Import) */
+  comment_id: string | null;
   status: "pending" | "selesai";
   urutan: number;
   link_url: string;

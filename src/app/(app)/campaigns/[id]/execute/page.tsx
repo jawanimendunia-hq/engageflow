@@ -36,7 +36,11 @@ export default async function ExecutePage({
       .order("urutan", { ascending: true });
 
     const accIds = Array.from(new Set((asg ?? []).map((a) => a.account_id)));
-    const comIds = Array.from(new Set((asg ?? []).map((a) => a.comment_id)));
+    // Hanya fetch comment dari table `comments` untuk assignment yang punya FK.
+    // Assignment hasil AI Meta Import pakai comment_text inline (tidak ada FK).
+    const comIds = Array.from(
+      new Set((asg ?? []).map((a) => a.comment_id).filter(Boolean))
+    );
 
     const [accsRes, comsRes] = await Promise.all([
       accIds.length > 0
@@ -79,7 +83,10 @@ export default async function ExecutePage({
     enriched = (asg ?? []).map((a) => {
       const link = linkMap.get(a.link_id);
       const acc = accMap.get(a.account_id);
-      const com = comMap.get(a.comment_id);
+      // Prioritas: inline (comment_text) > FK lookup (comment_id)
+      const com = a.comment_id ? comMap.get(a.comment_id) : null;
+      const inlineText: string | null = a.comment_text ?? null;
+      const inlineTone: string | null = a.comment_tone ?? null;
       return {
         id: a.id,
         link_id: a.link_id,
@@ -95,8 +102,8 @@ export default async function ExecutePage({
           | "selesai",
         account_nama: acc?.nama ?? "(akun terhapus)",
         account_warna: acc?.warna ?? null,
-        comment_isi: com?.isi ?? "(komentar terhapus)",
-        comment_tone: (com?.tone ?? "santai") as string,
+        comment_isi: inlineText ?? com?.isi ?? "(komentar terhapus)",
+        comment_tone: (inlineTone ?? com?.tone ?? "santai") as string,
       };
     });
   }

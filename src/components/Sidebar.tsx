@@ -13,6 +13,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./ThemeProvider";
+import { Logo } from "./Logo";
 
 const items = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -35,12 +36,9 @@ export default function Sidebar({ email }: { email: string }) {
 
   return (
     <aside className="w-60 shrink-0 border-r border-border bg-bg-elev flex flex-col">
-      <div className="p-5 border-b border-border">
-        <Link
-          href="/dashboard"
-          className="text-lg font-bold tracking-tight inline-block"
-        >
-          Engage<span className="text-accent">Flow</span>
+      <div className="p-5 border-b border-border flex items-center justify-center">
+        <Link href="/dashboard" aria-label="EngageFlow — ke dashboard">
+          <Logo size={56} className="text-fg" />
         </Link>
       </div>
 
