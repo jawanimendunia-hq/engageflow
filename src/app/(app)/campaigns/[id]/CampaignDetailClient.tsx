@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Sparkles,
+  FileSpreadsheet,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type { Account, Campaign, LinkRow } from "@/lib/types";
@@ -284,6 +285,23 @@ export default function CampaignDetailClient({
           >
             <Plus className="size-4" /> Tambah link
           </button>
+          <a
+            href={`/api/campaigns/${campaign.id}/export`}
+            className={cn(
+              "btn-secondary",
+              (links.length === 0 || totalAsg === 0) &&
+                "pointer-events-none opacity-50"
+            )}
+            title={
+              links.length === 0
+                ? "Belum ada link"
+                : totalAsg === 0
+                  ? "Belum ada assignment yang bisa diexport"
+                  : "Export semua link + komentar ke Excel"
+            }
+          >
+            <FileSpreadsheet className="size-4" /> Export Excel
+          </a>
           <button
             onClick={runAssignment}
             disabled={busy || links.length === 0 || linksWithoutAsg === 0}

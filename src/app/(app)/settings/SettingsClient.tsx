@@ -16,9 +16,19 @@ import {
   Pencil,
   X,
   Sparkles,
+  Zap,
+  Power,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { fmtDate, cn } from "@/lib/utils";
+import {
+  PROVIDER_LABELS,
+  PROVIDER_LIST,
+  PROVIDER_MODEL_OPTIONS,
+  type ProviderName,
+} from "@/lib/ai";
 
 interface Credential {
   id: string;
@@ -35,9 +45,12 @@ interface Sku {
   kategori: string;
 }
 
-interface AiInitial {
+export interface AiCredInitial {
+  provider: ProviderName;
   hasKey: boolean;
   model: string;
+  priority: number | null;
+  enabled: boolean;
   lastUsed: string | null;
   updatedAt: string | null;
 }
@@ -45,7 +58,7 @@ interface AiInitial {
 interface Props {
   initialCreds: Credential[];
   initialSkus: Sku[];
-  aiInitial: AiInitial;
+  aiInitial: AiCredInitial[];
 }
 
 export default function SettingsClient({
@@ -60,7 +73,7 @@ export default function SettingsClient({
           <SettingsIcon className="size-7" /> Settings
         </h1>
         <p className="text-sm text-muted mt-1">
-          Integrasi Meta Ads, AI Gemini, dan kamus SKU
+          Integrasi Meta Ads, AI Multi-Provider, dan kamus SKU
         </p>
       </div>
 
@@ -499,14 +512,41 @@ function CredentialRow({
 
 // =================== AI SECTION ===================
 
-function AiSection({ initial }: { initial: AiInitial }) {
-  const [hasKey, setHasKey] = useState(initial.hasKey);
-  const [model, setModel] = useState(initial.model);
-  const [lastUsed, setLastUsed] = useState(initial.lastUsed);
-  const [updatedAt, setUpdatedAt] = useState(initial.updatedAt);
-  const [apiKey, setApiKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
-  const [busy, setBusy] = useState<null | "save" | "test" | "delete">(null);
+const PROVIDER_HOWTO: Record<
+  ProviderName,
+  { url: string; placeholder: string; instructions: string[]; freeTier: string }
+> = {
+  gemini: {
+    url: "https://aistudio.google.com/apikey",
+    placeholder: "AIzaSy...",
+    instructions: [
+      "Buka Google AI Studio → klik 'Create API key'",
+      "Pilih project (atau buat baru) → Copy key",
+    ],
+    freeTier: "Free: 15 req/menit, 1500/hari (gemini-2.5-flash)",
+  },
+  cerebras: {
+    url: "https://cloud.cerebras.ai/platform/",
+    placeholder: "csk-...",
+    instructions: [
+      "Daftar di cloud.cerebras.ai → menu 'API Keys'",
+      "Klik 'Create API key' → Copy key (csk-...)",
+    ],
+    freeTier: "Free: ~30 req/menit, 14400/hari (llama-3.3-70b)",
+  },
+  groq: {
+    url: "https://console.groq.com/keys",
+    placeholder: "gsk_...",
+    instructions: [
+      "Daftar di console.groq.com → menu 'API Keys'",
+      "Klik 'Create API Key' → Copy key (gsk_...)",
+    ],
+    freeTier: "Free: 30 req/menit, 14400 token/menit (llama-3.3-70b)",
+  },
+};
+
+function AiSection({ initial }: { initial: AiCredInitial[] }) {
+  const [creds, setCreds] = useState<AiCredInitial[]>(initial);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(
     null
   );
@@ -516,110 +556,71 @@ function AiSection({ initial }: { initial: AiInitial }) {
     setTimeout(() => setMsg(null), 6000);
   }
 
-  async function save() {
-    if (!apiKey.trim() && !hasKey) {
-      notify("err", "API key wajib");
-      return;
-    }
-    setBusy("save");
-    const r = await fetch("/api/ai/save", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        api_key: apiKey.trim() || undefined,
-        model,
-      }),
-    });
-    const d = await r.json();
-    setBusy(null);
-    if (!r.ok) {
-      notify("err", d.error ?? "Gagal");
-      return;
-    }
-    notify("ok", `✓ Tersambung. Reply test: "${d.reply}"`);
-    setHasKey(true);
-    setApiKey("");
-    setUpdatedAt(new Date().toISOString());
+  function updateCred(provider: ProviderName, patch: Partial<AiCredInitial>) {
+    setCreds((prev) =>
+      prev.map((c) => (c.provider === provider ? { ...c, ...patch } : c))
+    );
   }
 
-  async function testNow() {
-    setBusy("test");
-    const r = await fetch("/api/ai/test");
-    const d = await r.json();
-    setBusy(null);
-    if (!r.ok) {
-      notify("err", d.error ?? "Gagal");
-      return;
-    }
-    notify("ok", `✓ ${d.model} merespons: "${d.reply}"`);
-  }
+  // Sorting by priority for display
+  const sortedCreds = [...creds].sort((a, b) => {
+    // hasKey duluan, lalu by priority
+    if (a.hasKey !== b.hasKey) return a.hasKey ? -1 : 1;
+    return (a.priority ?? 999) - (b.priority ?? 999);
+  });
 
-  async function unlink() {
-    if (!confirm("Hapus API key Gemini?")) return;
-    setBusy("delete");
-    const r = await fetch("/api/ai/save", { method: "DELETE" });
-    setBusy(null);
-    if (!r.ok) {
-      notify("err", "Gagal");
-      return;
-    }
-    setHasKey(false);
-    setLastUsed(null);
-    setUpdatedAt(null);
-    notify("ok", "API key dihapus");
-  }
+  const activeCount = creds.filter((c) => c.hasKey && c.enabled).length;
+  const rotationOrder = creds
+    .filter((c) => c.hasKey && c.enabled)
+    .sort((a, b) => (a.priority ?? 999) - (b.priority ?? 999))
+    .map((c) => PROVIDER_LABELS[c.provider]);
 
   return (
     <div className="card p-6">
       <div className="flex items-start justify-between gap-3 mb-1">
         <div>
           <h2 className="text-lg font-semibold flex items-center gap-2">
-            <Sparkles className="size-5 text-accent" /> AI Generator (Gemini)
+            <Sparkles className="size-5 text-accent" /> AI Multi-Provider
           </h2>
           <p className="text-sm text-muted mt-0.5">
-            Generate komentar otomatis pakai Gemini API saat import dari Meta Ads
+            Hubungkan Gemini, Cerebras, dan Groq — sistem akan rotasi otomatis
+            saat ada yang habis limit.
           </p>
         </div>
-        {hasKey && (
+        {activeCount > 0 && (
           <span className="badge status-selesai shrink-0">
-            <Check className="size-3 mr-1" /> aktif
+            <Check className="size-3 mr-1" /> {activeCount} aktif
           </span>
         )}
       </div>
 
-      {/* How to */}
-      <div className="mt-4 mb-4 p-3 rounded-lg bg-bg-elev border border-border text-xs leading-relaxed text-muted">
-        <div className="font-semibold text-fg flex items-center gap-1.5 mb-1.5">
-          <AlertTriangle className="size-3.5 text-amber-500" />
-          Dapat API key gratis:
+      {/* Rotation order display */}
+      {rotationOrder.length > 0 && (
+        <div className="mt-4 p-3 rounded-lg bg-accent/5 border border-accent/20 text-xs">
+          <div className="font-semibold text-fg flex items-center gap-1.5 mb-1.5">
+            <Zap className="size-3.5 text-accent" />
+            Urutan rotasi (priority ascending):
+          </div>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {rotationOrder.map((label, i) => (
+              <span key={label} className="inline-flex items-center gap-1.5">
+                <span className="badge bg-bg-elev text-fg">{i + 1}. {label}</span>
+                {i < rotationOrder.length - 1 && (
+                  <span className="text-muted">→</span>
+                )}
+              </span>
+            ))}
+          </div>
+          <p className="text-muted mt-1.5">
+            Jika provider pertama rate-limited / gagal, otomatis pindah ke provider berikutnya.
+          </p>
         </div>
-        <ol className="list-decimal pl-5 space-y-0.5">
-          <li>
-            Buka{" "}
-            <a
-              href="https://aistudio.google.com/apikey"
-              target="_blank"
-              rel="noreferrer"
-              className="text-accent hover:underline inline-flex items-center gap-0.5"
-            >
-              Google AI Studio <ExternalLink className="size-3" />
-            </a>
-          </li>
-          <li>
-            Klik <strong className="text-fg">Create API key</strong> → pilih project
-          </li>
-          <li>Copy key (formatnya <code className="text-fg">AIzaSy...</code>)</li>
-          <li>
-            Free tier 2.5 Flash: 15 req/menit, 1500/hari. Cukup untuk pemakaian
-            normal.
-          </li>
-        </ol>
-      </div>
+      )}
 
       {msg && (
         <div
           className={cn(
-            "mb-4 text-xs rounded-md px-3 py-2 border flex items-start gap-2",
+            "mt-4 text-xs rounded-md px-3 py-2 border flex items-start gap-2",
             msg.kind === "ok"
               ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
               : "bg-red-500/10 text-red-700 dark:text-red-300 border-red-500/20"
@@ -634,103 +635,386 @@ function AiSection({ initial }: { initial: AiInitial }) {
         </div>
       )}
 
-      <div className="space-y-3">
-        <div>
-          <label className="text-xs text-muted block mb-1">
-            API Key{" "}
-            {hasKey && (
-              <span className="text-emerald-600 dark:text-emerald-400">
-                (tersimpan, kosongkan jika tidak ganti)
+      <div className="space-y-3 mt-4">
+        {sortedCreds.map((cred) => (
+          <ProviderRow
+            key={cred.provider}
+            cred={cred}
+            onUpdate={(patch) => updateCred(cred.provider, patch)}
+            onNotify={notify}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProviderRow({
+  cred,
+  onUpdate,
+  onNotify,
+}: {
+  cred: AiCredInitial;
+  onUpdate: (patch: Partial<AiCredInitial>) => void;
+  onNotify: (kind: "ok" | "err", text: string) => void;
+}) {
+  const [apiKey, setApiKey] = useState("");
+  const [model, setModel] = useState(
+    cred.model || PROVIDER_MODEL_OPTIONS[cred.provider][0].value
+  );
+  const [showKey, setShowKey] = useState(false);
+  const [expanded, setExpanded] = useState(!cred.hasKey);
+  const [busy, setBusy] = useState<null | "save" | "test" | "delete" | "toggle" | "priority" | "model">(
+    null
+  );
+
+  const howto = PROVIDER_HOWTO[cred.provider];
+  const label = PROVIDER_LABELS[cred.provider];
+
+  async function save() {
+    if (!apiKey.trim() && !cred.hasKey) {
+      onNotify("err", `API key ${label} wajib`);
+      return;
+    }
+    setBusy("save");
+    const r = await fetch("/api/ai/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: cred.provider,
+        api_key: apiKey.trim(),
+        model,
+      }),
+    });
+    const d = await r.json();
+    setBusy(null);
+    if (!r.ok) {
+      onNotify("err", d.error ?? "Gagal");
+      return;
+    }
+    onNotify("ok", `✓ ${label} tersambung. Reply: "${d.reply}"`);
+    onUpdate({
+      hasKey: true,
+      model,
+      updatedAt: new Date().toISOString(),
+      enabled: true,
+    });
+    setApiKey("");
+    setExpanded(false);
+  }
+
+  async function testNow() {
+    setBusy("test");
+    const r = await fetch(`/api/ai/test?provider=${cred.provider}`);
+    const d = await r.json();
+    setBusy(null);
+    if (!r.ok) {
+      onNotify("err", d.error ?? "Gagal");
+      return;
+    }
+    onNotify("ok", `✓ ${label} (${d.model}) merespons: "${d.reply}"`);
+  }
+
+  async function unlink() {
+    if (!confirm(`Hapus API key ${label}?`)) return;
+    setBusy("delete");
+    const r = await fetch(`/api/ai/save?provider=${cred.provider}`, {
+      method: "DELETE",
+    });
+    setBusy(null);
+    if (!r.ok) {
+      onNotify("err", "Gagal");
+      return;
+    }
+    onUpdate({
+      hasKey: false,
+      lastUsed: null,
+      updatedAt: null,
+      enabled: true,
+    });
+    setApiKey("");
+    setExpanded(true);
+    onNotify("ok", `${label} dihapus`);
+  }
+
+  async function toggleEnabled() {
+    setBusy("toggle");
+    const newEnabled = !cred.enabled;
+    const r = await fetch("/api/ai/save", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider: cred.provider, enabled: newEnabled }),
+    });
+    setBusy(null);
+    if (!r.ok) {
+      onNotify("err", "Gagal");
+      return;
+    }
+    onUpdate({ enabled: newEnabled });
+    onNotify("ok", `${label} ${newEnabled ? "diaktifkan" : "dinonaktifkan"}`);
+  }
+
+  async function changePriority(delta: number) {
+    setBusy("priority");
+    const newPriority = (cred.priority ?? 50) + delta;
+    const r = await fetch("/api/ai/save", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: cred.provider,
+        priority: newPriority,
+      }),
+    });
+    setBusy(null);
+    if (!r.ok) {
+      onNotify("err", "Gagal");
+      return;
+    }
+    onUpdate({ priority: newPriority });
+  }
+
+  async function changeModel(newModel: string) {
+    setModel(newModel);
+    if (!cred.hasKey) return; // belum tersimpan, simpan via Save
+    setBusy("model");
+    const r = await fetch("/api/ai/save", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: cred.provider,
+        model: newModel,
+      }),
+    });
+    setBusy(null);
+    if (!r.ok) {
+      onNotify("err", "Gagal update model");
+      return;
+    }
+    onUpdate({ model: newModel });
+  }
+
+  return (
+    <div
+      className={cn(
+        "card p-4",
+        cred.hasKey && cred.enabled && "border-accent/30",
+        cred.hasKey && !cred.enabled && "opacity-60"
+      )}
+    >
+      {/* Header row */}
+      <div className="flex items-center gap-3">
+        <div
+          className={cn(
+            "size-9 rounded-lg flex items-center justify-center shrink-0",
+            cred.hasKey
+              ? cred.enabled
+                ? "bg-accent/10 text-accent"
+                : "bg-bg-elev text-muted"
+              : "bg-bg-elev text-muted"
+          )}
+        >
+          <Sparkles className="size-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-sm">{label}</span>
+            {cred.hasKey ? (
+              cred.enabled ? (
+                <span className="badge status-selesai text-[10px]">aktif</span>
+              ) : (
+                <span className="badge status-pending text-[10px]">nonaktif</span>
+              )
+            ) : (
+              <span className="badge bg-bg-elev text-muted text-[10px]">
+                belum di-set
               </span>
             )}
-          </label>
-          <div className="relative">
-            <input
-              type={showKey ? "text" : "password"}
-              className="input pr-10 font-mono text-xs"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder={hasKey ? "•••••••••••• (kosongkan jika tidak ganti)" : "AIzaSy..."}
-            />
+            {cred.hasKey && cred.priority !== null && (
+              <span className="text-[10px] text-muted">
+                priority {cred.priority}
+              </span>
+            )}
+          </div>
+          <div className="text-[11px] text-muted">{howto.freeTier}</div>
+        </div>
+
+        {/* Priority controls + power toggle */}
+        {cred.hasKey && (
+          <div className="flex items-center gap-1 shrink-0">
             <button
-              type="button"
-              onClick={() => setShowKey((s) => !s)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-fg"
-              tabIndex={-1}
+              onClick={() => changePriority(-10)}
+              disabled={busy !== null}
+              title="Naikkan priority (rotasi duluan)"
+              className="btn-ghost p-1.5"
             >
-              {showKey ? (
-                <EyeOff className="size-4" />
+              <ArrowUp className="size-3.5" />
+            </button>
+            <button
+              onClick={() => changePriority(10)}
+              disabled={busy !== null}
+              title="Turunkan priority"
+              className="btn-ghost p-1.5"
+            >
+              <ArrowDown className="size-3.5" />
+            </button>
+            <button
+              onClick={toggleEnabled}
+              disabled={busy !== null}
+              title={cred.enabled ? "Nonaktifkan" : "Aktifkan"}
+              className={cn(
+                "btn-ghost p-1.5",
+                cred.enabled
+                  ? "text-emerald-600"
+                  : "text-muted"
+              )}
+            >
+              {busy === "toggle" ? (
+                <Loader2 className="size-3.5 animate-spin" />
               ) : (
-                <Eye className="size-4" />
+                <Power className="size-3.5" />
               )}
             </button>
           </div>
-        </div>
+        )}
 
-        <div>
-          <label className="text-xs text-muted block mb-1">Model</label>
-          <select
-            className="input"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-          >
-            <option value="gemini-2.5-flash">
-              gemini-2.5-flash (15 RPM, 1500/hari) — direkomendasikan
-            </option>
-            <option value="gemini-2.5-flash-lite">
-              gemini-2.5-flash-lite (lebih cepat, kualitas lebih rendah)
-            </option>
-            <option value="gemini-2.5-pro">
-              gemini-2.5-pro (kualitas terbaik, free tier 2 RPM, 50/hari)
-            </option>
-          </select>
-        </div>
+        <button
+          onClick={() => setExpanded((e) => !e)}
+          className="btn-ghost p-1.5 shrink-0"
+          title={expanded ? "Tutup" : "Edit"}
+        >
+          {expanded ? (
+            <X className="size-4" />
+          ) : (
+            <Pencil className="size-3.5" />
+          )}
+        </button>
+      </div>
 
-        <div className="flex flex-wrap gap-2 pt-1">
-          <button onClick={save} disabled={busy !== null} className="btn-primary">
-            {busy === "save" ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : hasKey ? (
-              "Update"
-            ) : (
-              "Simpan & test"
+      {expanded && (
+        <div className="mt-3 pt-3 border-t border-border space-y-3">
+          {/* How to */}
+          <div className="p-2.5 rounded-lg bg-bg-elev border border-border text-[11px] leading-relaxed text-muted">
+            <div className="font-semibold text-fg flex items-center gap-1.5 mb-1">
+              <AlertTriangle className="size-3 text-amber-500" />
+              Cara dapat API key gratis:
+            </div>
+            <ol className="list-decimal pl-4 space-y-0.5">
+              {howto.instructions.map((step, i) => (
+                <li key={i}>{step}</li>
+              ))}
+              <li>
+                <a
+                  href={howto.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-accent hover:underline inline-flex items-center gap-0.5"
+                >
+                  {howto.url} <ExternalLink className="size-3" />
+                </a>
+              </li>
+            </ol>
+          </div>
+
+          {/* API Key input */}
+          <div>
+            <label className="text-xs text-muted block mb-1">
+              API Key{" "}
+              {cred.hasKey && (
+                <span className="text-emerald-600 dark:text-emerald-400">
+                  (tersimpan, kosongkan jika tidak ganti)
+                </span>
+              )}
+            </label>
+            <div className="relative">
+              <input
+                type={showKey ? "text" : "password"}
+                className="input pr-10 font-mono text-xs"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder={
+                  cred.hasKey ? "•••••• (kosongkan jika tidak ganti)" : howto.placeholder
+                }
+              />
+              <button
+                type="button"
+                onClick={() => setShowKey((s) => !s)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted hover:text-fg"
+                tabIndex={-1}
+              >
+                {showKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </button>
+            </div>
+          </div>
+
+          {/* Model selection */}
+          <div>
+            <label className="text-xs text-muted block mb-1">Model</label>
+            <select
+              className="input"
+              value={model}
+              onChange={(e) => changeModel(e.target.value)}
+              disabled={busy !== null}
+            >
+              {PROVIDER_MODEL_OPTIONS[cred.provider].map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Buttons */}
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={save}
+              disabled={busy !== null || (!apiKey.trim() && !cred.hasKey)}
+              className="btn-primary"
+            >
+              {busy === "save" ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : cred.hasKey ? (
+                "Update"
+              ) : (
+                "Simpan & test"
+              )}
+            </button>
+            {cred.hasKey && (
+              <>
+                <button
+                  onClick={testNow}
+                  disabled={busy !== null}
+                  className="btn-secondary"
+                >
+                  {busy === "test" ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    "Test"
+                  )}
+                </button>
+                <button
+                  onClick={unlink}
+                  disabled={busy !== null}
+                  className="btn-ghost text-red-500"
+                >
+                  {busy === "delete" ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    "Hapus"
+                  )}
+                </button>
+              </>
             )}
-          </button>
-          {hasKey && (
-            <>
-              <button
-                onClick={testNow}
-                disabled={busy !== null}
-                className="btn-secondary"
-              >
-                {busy === "test" ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  "Test"
-                )}
-              </button>
-              <button
-                onClick={unlink}
-                disabled={busy !== null}
-                className="btn-ghost text-red-500"
-              >
-                {busy === "delete" ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  "Hapus"
-                )}
-              </button>
-            </>
+          </div>
+
+          {/* Meta info */}
+          {cred.hasKey && (
+            <div className="text-[11px] text-muted pt-2 border-t border-border space-y-0.5">
+              {cred.updatedAt && <div>Disimpan: {fmtDate(cred.updatedAt)}</div>}
+              {cred.lastUsed && <div>Terakhir dipakai: {fmtDate(cred.lastUsed)}</div>}
+            </div>
           )}
         </div>
-
-        {hasKey && (
-          <div className="text-xs text-muted pt-2 border-t border-border space-y-0.5">
-            {updatedAt && <div>Disimpan: {fmtDate(updatedAt)}</div>}
-            {lastUsed && <div>Terakhir dipakai: {fmtDate(lastUsed)}</div>}
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }

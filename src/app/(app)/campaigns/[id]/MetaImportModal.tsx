@@ -51,6 +51,7 @@ interface RowProgress {
   status: "pending" | "saving-link" | "generating" | "saving-comments" | "assigning" | "done" | "error" | "rate-limited";
   message?: string;
   comments_count?: number;
+  used_provider?: string;
 }
 
 export default function MetaImportModal({
@@ -356,9 +357,11 @@ export default function MetaImportModal({
           continue;
         }
 
-        // 2) Generate komentar via Gemini (dengan retry kalau rate limit)
+        // 2) Generate komentar — rotation otomatis di server.
+        // Kalau SEMUA provider habis (all_failed + rate_limited), wait & retry.
         updateProgress(ad.ad_id, { status: "generating" });
         let generated: { isi: string; tone: string }[] = [];
+        let usedProvider: string | undefined;
         let attempt = 0;
         while (true) {
           attempt++;
@@ -379,19 +382,27 @@ export default function MetaImportModal({
           const data = await r.json();
           if (r.ok) {
             generated = data.comments ?? [];
+            usedProvider = data.used_provider_label ?? data.used_provider;
             break;
           }
-          if (data.rate_limited && attempt <= 3) {
-            const wait = (data.retry_after_sec ?? 60) * 1000;
+          // Semua provider gagal & ada yang rate-limited → wait, retry
+          if (data.all_failed && data.rate_limited && attempt <= 2) {
+            const waitSec = 60; // semua habis, tunggu 1 menit
             updateProgress(ad.ad_id, {
               status: "rate-limited",
-              message: `Rate limit, retry dalam ${data.retry_after_sec}s (attempt ${attempt}/3)`,
+              message: `Semua AI habis limit (${data.failed_providers
+                ?.map((f: any) => f.provider)
+                .join(", ")}), tunggu ${waitSec}s (attempt ${attempt}/2)`,
             });
-            await sleep(wait);
+            await sleep(waitSec * 1000);
             if (cancelled) break;
             continue;
           }
-          throw new Error(data.error ?? "Gemini gagal");
+          // Error non-recoverable
+          const detail = data.failed_providers
+            ?.map((f: any) => `${f.provider}: ${f.reason}`)
+            .join(" | ");
+          throw new Error(detail || data.error || "AI gagal");
         }
         if (cancelled) break;
 
@@ -456,13 +467,15 @@ export default function MetaImportModal({
         updateProgress(ad.ad_id, {
           status: "done",
           comments_count: generated.length,
+          used_provider: usedProvider,
         });
         linksOk++;
         commentsTotal += generated.length;
 
-        // 5) Throttle 4.5 detik antar request Gemini (free tier ~15 RPM)
+        // 5) Throttle ringan 1.5s antar request — dengan 3 provider rotasi
+        // (effective ~75 RPM kombinasi), tidak perlu wait lama
         if (i < rows.length - 1) {
-          await sleep(4500);
+          await sleep(1500);
         }
       } catch (e: any) {
         updateProgress(ad.ad_id, {
@@ -482,7 +495,6 @@ export default function MetaImportModal({
     onClose();
   }
 
-  const selectedCred = creds.find((c) => c.id === selectedCredId);
   const eligibleCount = ads.filter((a) => a.post_url).length;
   const skippedCount = ads.length - eligibleCount;
   const readyCount = ads.filter(
@@ -888,7 +900,7 @@ export default function MetaImportModal({
                     className="accent-accent"
                   />
                   <Wand2 className="size-4 text-accent" />
-                  <span>Generate komentar pakai AI Gemini</span>
+                  <span>Generate komentar pakai AI (rotasi multi-provider)</span>
                 </label>
                 {useAi && (
                   <div className="flex items-center gap-2">
@@ -910,13 +922,13 @@ export default function MetaImportModal({
             ) : (
               <div className="text-xs text-muted flex items-center gap-1.5">
                 <AlertTriangle className="size-3.5 text-amber-500" />
-                AI Gemini belum di-set up.{" "}
+                AI belum di-set up. Tambah minimal 1 dari Gemini / Cerebras / Groq di{" "}
                 <a
                   href="/settings"
                   target="_blank"
                   className="text-accent hover:underline"
                 >
-                  Set up di Settings
+                  Settings
                 </a>{" "}
                 untuk auto-generate komentar.
               </div>
@@ -932,7 +944,7 @@ export default function MetaImportModal({
                 )}
                 {useAi && readyCount > 0 && (
                   <span className="ml-2 text-accent">
-                    · estimasi {Math.ceil((readyCount * 4.5) / 60)} menit (AI)
+                    · estimasi {Math.ceil((readyCount * 1.5) / 60)} menit (AI)
                   </span>
                 )}
               </div>
@@ -1094,6 +1106,9 @@ function ImportingProgress({
                       p?.comments_count !== undefined &&
                       p.comments_count > 0 &&
                       ` · ${p.comments_count} komentar`}
+                    {status === "done" && p?.used_provider && (
+                      <span className="text-accent"> · via {p.used_provider}</span>
+                    )}
                   </div>
                 </div>
               </div>

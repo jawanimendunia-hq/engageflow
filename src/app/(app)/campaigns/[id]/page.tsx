@@ -48,11 +48,11 @@ export default async function CampaignDetailPage({
     .select("id", { count: "exact", head: true });
   const metaConnected = (credCount ?? 0) > 0;
 
-  // Cek AI Gemini
+  // Cek AI: minimal ada 1 provider enabled
   const { count: aiCount } = await supabase
     .from("ai_credentials")
     .select("id", { count: "exact", head: true })
-    .eq("provider", "gemini");
+    .eq("enabled", true);
   const hasAi = (aiCount ?? 0) > 0;
 
   // Fetch accounts (untuk modal — buildAssignments butuh ini)

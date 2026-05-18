@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
-import SettingsClient from "./SettingsClient";
+import SettingsClient, { type AiCredInitial } from "./SettingsClient";
+import { PROVIDER_LIST } from "@/lib/ai";
 
 export const dynamic = "force-dynamic";
 
@@ -17,27 +18,33 @@ export default async function SettingsPage() {
     .select("*")
     .order("kode", { ascending: true });
 
-  const { data: ai } = await supabase
+  const { data: aiRows = [] } = await supabase
     .from("ai_credentials")
-    .select("id, model, last_used_at, updated_at")
-    .eq("provider", "gemini")
-    .maybeSingle();
+    .select("provider, model, priority, enabled, last_used_at, updated_at")
+    .order("priority", { ascending: true });
+
+  // Index by provider
+  const byProvider = new Map<string, any>();
+  for (const row of aiRows ?? []) byProvider.set(row.provider, row);
+
+  const aiInitial: AiCredInitial[] = PROVIDER_LIST.map((p) => {
+    const row = byProvider.get(p);
+    return {
+      provider: p,
+      hasKey: !!row,
+      model: row?.model ?? "",
+      priority: row?.priority ?? null,
+      enabled: row?.enabled ?? true,
+      lastUsed: row?.last_used_at ?? null,
+      updatedAt: row?.updated_at ?? null,
+    };
+  });
 
   return (
     <SettingsClient
       initialCreds={creds ?? []}
       initialSkus={skus ?? []}
-      aiInitial={
-        ai
-          ? {
-              hasKey: true,
-              model: ai.model ?? "gemini-2.5-flash",
-              lastUsed: ai.last_used_at,
-              updatedAt: ai.updated_at,
-            }
-          : { hasKey: false, model: "gemini-2.5-flash", lastUsed: null, updatedAt: null }
-      }
+      aiInitial={aiInitial}
     />
   );
 }
-
