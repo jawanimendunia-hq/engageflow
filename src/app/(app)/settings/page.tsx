@@ -20,7 +20,9 @@ export default async function SettingsPage() {
 
   const { data: aiRows = [] } = await supabase
     .from("ai_credentials")
-    .select("provider, model, priority, enabled, last_used_at, updated_at")
+    .select(
+      "provider, model, priority, enabled, last_used_at, updated_at, cooldown_until, last_error, consecutive_errors"
+    )
     .order("priority", { ascending: true });
 
   // Index by provider
@@ -37,6 +39,9 @@ export default async function SettingsPage() {
       enabled: row?.enabled ?? true,
       lastUsed: row?.last_used_at ?? null,
       updatedAt: row?.updated_at ?? null,
+      cooldownUntil: row?.cooldown_until ?? null,
+      lastError: row?.last_error ?? null,
+      consecutiveErrors: row?.consecutive_errors ?? 0,
     };
   });
 

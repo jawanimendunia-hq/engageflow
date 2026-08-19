@@ -7,6 +7,7 @@
  */
 
 import { buildPrompt, parseCommentsJson } from "./prompt";
+import { outputTokenLimit, readRateLimit } from "./limits";
 import {
   ProviderClient,
   ProviderError,
@@ -20,7 +21,7 @@ const NAME = "gemini" as const;
 
 export const gemini: ProviderClient = {
   name: NAME,
-  defaultModel: "gemini-2.5-flash",
+  defaultModel: "gemini-2.5-flash-lite",
 
   async test(apiKey, model) {
     try {
@@ -62,19 +63,25 @@ export const gemini: ProviderClient = {
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
             temperature: 0.95,
-            maxOutputTokens: 4096,
+            maxOutputTokens: outputTokenLimit(args.count),
             responseMimeType: "application/json",
+            thinkingConfig: { thinkingBudget: 0 },
           },
         }),
       }
     );
 
-    if (res.status === 429) {
-      const retryAfter = parseInt(res.headers.get("retry-after") ?? "60", 10);
-      throw new ProviderRateLimitError(NAME, isNaN(retryAfter) ? 60 : retryAfter);
-    }
-
     const data = await res.json();
+
+    if (res.status === 429) {
+      const limit = readRateLimit(res, data);
+      throw new ProviderRateLimitError(
+        NAME,
+        limit.retryAfterSec,
+        limit.scope,
+        data?.error?.message
+      );
+    }
 
     // Treat 503 / overloaded sebagai rate-limit-ish supaya orchestrator rotasi
     const errMsg = (data?.error?.message ?? "").toLowerCase();
@@ -86,7 +93,12 @@ export const gemini: ProviderClient = {
       errMsg.includes("try again later");
 
     if (!res.ok && isTransient) {
-      throw new ProviderRateLimitError(NAME, 30, data?.error?.message);
+      throw new ProviderRateLimitError(
+        NAME,
+        30,
+        "minute",
+        data?.error?.message
+      );
     }
 
     if (!res.ok) {

@@ -3,10 +3,11 @@
  * Endpoint: https://api.cerebras.ai/v1/chat/completions
  * Free tier: ~30 RPM, 14400/hari (varies per model)
  *
- * Model gratis populer: llama-3.3-70b, llama3.1-8b
+ * Model gratis utama: gpt-oss-120b
  */
 
 import { buildPrompt, parseCommentsJson } from "./prompt";
+import { outputTokenLimit, readRateLimit } from "./limits";
 import {
   ProviderClient,
   ProviderError,
@@ -20,7 +21,7 @@ const NAME = "cerebras" as const;
 
 export const cerebras: ProviderClient = {
   name: NAME,
-  defaultModel: "llama-3.3-70b",
+  defaultModel: "gpt-oss-120b",
 
   async test(apiKey, model) {
     try {
@@ -33,7 +34,8 @@ export const cerebras: ProviderClient = {
         body: JSON.stringify({
           model,
           messages: [{ role: "user", content: "Reply with exactly: PONG" }],
-          max_tokens: 10,
+          max_completion_tokens: 10,
+          ...(model === "gpt-oss-120b" ? { reasoning_effort: "low" } : {}),
         }),
       });
       const data = await res.json();
@@ -63,22 +65,31 @@ export const cerebras: ProviderClient = {
         model,
         messages: [{ role: "user", content: prompt }],
         temperature: 0.95,
-        max_tokens: 4096,
+        max_completion_tokens: outputTokenLimit(args.count),
         response_format: { type: "json_object" },
+        ...(model === "gpt-oss-120b"
+          ? { reasoning_effort: "low", reasoning_format: "hidden" }
+          : {}),
       }),
     });
 
-    if (res.status === 429) {
-      const retryAfter = parseInt(res.headers.get("retry-after") ?? "60", 10);
-      throw new ProviderRateLimitError(NAME, isNaN(retryAfter) ? 60 : retryAfter);
-    }
-
     const data = await res.json();
+
+    if (res.status === 429) {
+      const limit = readRateLimit(res, data);
+      throw new ProviderRateLimitError(
+        NAME,
+        limit.retryAfterSec,
+        limit.scope,
+        data?.error?.message ?? data?.message
+      );
+    }
 
     if (res.status === 503 || res.status === 502) {
       throw new ProviderRateLimitError(
         NAME,
         30,
+        "minute",
         data?.error?.message ?? "overloaded"
       );
     }

@@ -5,6 +5,7 @@ import { Plus, Trash2, MessageSquare, Filter } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type { Comment, Tone } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useDialog } from "@/components/DialogProvider";
 
 const TONES: Tone[] = ["pertanyaan", "santai", "testimoni", "reaksi"];
 
@@ -14,6 +15,7 @@ interface Props {
 }
 
 export default function CommentsClient({ initial, usageMap }: Props) {
+  const dialog = useDialog();
   const [comments, setComments] = useState<Comment[]>(initial);
   const [isi, setIsi] = useState("");
   const [kategori, setKategori] = useState("");
@@ -105,10 +107,19 @@ export default function CommentsClient({ initial, usageMap }: Props) {
   }
 
   async function remove(id: string) {
-    if (!confirm("Hapus komentar ini?")) return;
+    if (
+      !(await dialog.confirm("Komentar akan dihapus dari bank komentar.", {
+        title: "Hapus komentar?",
+        confirmText: "Ya, hapus",
+        variant: "danger",
+      }))
+    ) return;
     const supabase = createClient();
     const { error } = await supabase.from("comments").delete().eq("id", id);
-    if (error) return alert(error.message);
+    if (error) {
+      await dialog.alert(error.message, { title: "Gagal menghapus", variant: "danger" });
+      return;
+    }
     setComments((prev) => prev.filter((c) => c.id !== id));
   }
 

@@ -26,9 +26,11 @@ import { fmtDate, cn } from "@/lib/utils";
 import {
   PROVIDER_LABELS,
   PROVIDER_LIST,
+  PROVIDER_FREE_WEIGHTS,
   PROVIDER_MODEL_OPTIONS,
   type ProviderName,
 } from "@/lib/ai";
+import { useDialog } from "@/components/DialogProvider";
 
 interface Credential {
   id: string;
@@ -53,6 +55,9 @@ export interface AiCredInitial {
   enabled: boolean;
   lastUsed: string | null;
   updatedAt: string | null;
+  cooldownUntil: string | null;
+  lastError: string | null;
+  consecutiveErrors: number;
 }
 
 interface Props {
@@ -346,6 +351,7 @@ function CredentialRow({
   onDeleted: () => void | Promise<void>;
   onError: (msg: string) => void;
 }) {
+  const dialog = useDialog();
   const [label, setLabel] = useState(cred.label ?? "");
   const [token, setToken] = useState("");
   const [accId, setAccId] = useState(cred.ad_account_id);
@@ -383,8 +389,16 @@ function CredentialRow({
   }
 
   async function del() {
-    if (!confirm(`Hapus credential "${cred.label ?? cred.ad_account_id}"?`))
-      return;
+    if (
+      !(await dialog.confirm(
+        `Credential “${cred.label ?? cred.ad_account_id}” akan dihapus.`,
+        {
+          title: "Hapus credential Meta?",
+          confirmText: "Ya, hapus",
+          variant: "danger",
+        }
+      ))
+    ) return;
     setBusy("delete");
     const r = await fetch(`/api/meta/credentials?id=${cred.id}`, {
       method: "DELETE",
@@ -523,7 +537,7 @@ const PROVIDER_HOWTO: Record<
       "Buka Google AI Studio → klik 'Create API key'",
       "Pilih project (atau buat baru) → Copy key",
     ],
-    freeTier: "Free: 15 req/menit, 1500/hari (gemini-2.5-flash)",
+    freeTier: "Free: kuota dinamis per project · gunakan Flash-Lite",
   },
   cerebras: {
     url: "https://cloud.cerebras.ai/platform/",
@@ -532,7 +546,7 @@ const PROVIDER_HOWTO: Record<
       "Daftar di cloud.cerebras.ai → menu 'API Keys'",
       "Klik 'Create API key' → Copy key (csk-...)",
     ],
-    freeTier: "Free: ~30 req/menit, 14400/hari (llama-3.3-70b)",
+    freeTier: "Free: model aktif gpt-oss-120b · 30 RPM dasar",
   },
   groq: {
     url: "https://console.groq.com/keys",
@@ -541,7 +555,16 @@ const PROVIDER_HOWTO: Record<
       "Daftar di console.groq.com → menu 'API Keys'",
       "Klik 'Create API Key' → Copy key (gsk_...)",
     ],
-    freeTier: "Free: 30 req/menit, 14400 token/menit (llama-3.3-70b)",
+    freeTier: "Free: Qwen 3.6 27B · 30 RPM / 1000 RPD dasar",
+  },
+  openrouter: {
+    url: "https://openrouter.ai/settings/keys",
+    placeholder: "sk-or-v1-...",
+    instructions: [
+      "Daftar di openrouter.ai → buka menu Keys",
+      "Klik 'Create Key' → Copy key (sk-or-v1-...)",
+    ],
+    freeTier: "Free: 50 request/hari · hanya cadangan terakhir",
   },
 };
 
@@ -572,8 +595,17 @@ function AiSection({ initial }: { initial: AiCredInitial[] }) {
   const activeCount = creds.filter((c) => c.hasKey && c.enabled).length;
   const rotationOrder = creds
     .filter((c) => c.hasKey && c.enabled)
-    .sort((a, b) => (a.priority ?? 999) - (b.priority ?? 999))
-    .map((c) => PROVIDER_LABELS[c.provider]);
+    .sort((a, b) => {
+      if (a.provider === "openrouter") return 1;
+      if (b.provider === "openrouter") return -1;
+      return (a.priority ?? 999) - (b.priority ?? 999);
+    })
+    .map(
+      (c) =>
+        c.provider === "openrouter"
+          ? `${PROVIDER_LABELS[c.provider]} (cadangan terakhir)`
+          : `${PROVIDER_LABELS[c.provider]} ${PROVIDER_FREE_WEIGHTS[c.provider]}%`
+    );
 
   return (
     <div className="card p-6">
@@ -583,8 +615,8 @@ function AiSection({ initial }: { initial: AiCredInitial[] }) {
             <Sparkles className="size-5 text-accent" /> AI Multi-Provider
           </h2>
           <p className="text-sm text-muted mt-0.5">
-            Hubungkan Gemini, Cerebras, dan Groq — sistem akan rotasi otomatis
-            saat ada yang habis limit.
+            Tiga provider utama membagi beban; OpenRouter Free menjadi jaringan
+            cadangan terakhir saat semuanya gagal atau cooldown.
           </p>
         </div>
         {activeCount > 0 && (
@@ -599,7 +631,7 @@ function AiSection({ initial }: { initial: AiCredInitial[] }) {
         <div className="mt-4 p-3 rounded-lg bg-accent/5 border border-accent/20 text-xs">
           <div className="font-semibold text-fg flex items-center gap-1.5 mb-1.5">
             <Zap className="size-3.5 text-accent" />
-            Urutan rotasi (priority ascending):
+            Pembagian beban free-tier (priority dipakai untuk fallback):
           </div>
           <div className="flex items-center gap-1.5 flex-wrap">
             {rotationOrder.map((label, i) => (
@@ -612,7 +644,8 @@ function AiSection({ initial }: { initial: AiCredInitial[] }) {
             ))}
           </div>
           <p className="text-muted mt-1.5">
-            Jika provider pertama rate-limited / gagal, otomatis pindah ke provider berikutnya.
+            Bobot dinormalisasi dari provider yang aktif. Jika provider terpilih
+            gagal, sistem mengikuti urutan priority sebagai fallback.
           </p>
         </div>
       )}
@@ -658,6 +691,7 @@ function ProviderRow({
   onUpdate: (patch: Partial<AiCredInitial>) => void;
   onNotify: (kind: "ok" | "err", text: string) => void;
 }) {
+  const dialog = useDialog();
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState(
     cred.model || PROVIDER_MODEL_OPTIONS[cred.provider][0].value
@@ -670,6 +704,8 @@ function ProviderRow({
 
   const howto = PROVIDER_HOWTO[cred.provider];
   const label = PROVIDER_LABELS[cred.provider];
+  const cooling =
+    !!cred.cooldownUntil && new Date(cred.cooldownUntil).getTime() > Date.now();
 
   async function save() {
     if (!apiKey.trim() && !cred.hasKey) {
@@ -698,6 +734,9 @@ function ProviderRow({
       model,
       updatedAt: new Date().toISOString(),
       enabled: true,
+      cooldownUntil: null,
+      lastError: null,
+      consecutiveErrors: 0,
     });
     setApiKey("");
     setExpanded(false);
@@ -713,10 +752,22 @@ function ProviderRow({
       return;
     }
     onNotify("ok", `✓ ${label} (${d.model}) merespons: "${d.reply}"`);
+    onUpdate({
+      cooldownUntil: null,
+      lastError: null,
+      consecutiveErrors: 0,
+      lastUsed: new Date().toISOString(),
+    });
   }
 
   async function unlink() {
-    if (!confirm(`Hapus API key ${label}?`)) return;
+    if (
+      !(await dialog.confirm(`API key ${label} akan dihapus dari aplikasi.`, {
+        title: "Hapus API key?",
+        confirmText: "Ya, hapus",
+        variant: "danger",
+      }))
+    ) return;
     setBusy("delete");
     const r = await fetch(`/api/ai/save?provider=${cred.provider}`, {
       method: "DELETE",
@@ -731,6 +782,9 @@ function ProviderRow({
       lastUsed: null,
       updatedAt: null,
       enabled: true,
+      cooldownUntil: null,
+      lastError: null,
+      consecutiveErrors: 0,
     });
     setApiKey("");
     setExpanded(true);
@@ -819,7 +873,9 @@ function ProviderRow({
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-sm">{label}</span>
             {cred.hasKey ? (
-              cred.enabled ? (
+              cred.enabled && cooling ? (
+                <span className="badge status-pending text-[10px]">cooldown</span>
+              ) : cred.enabled ? (
                 <span className="badge status-selesai text-[10px]">aktif</span>
               ) : (
                 <span className="badge status-pending text-[10px]">nonaktif</span>
@@ -829,34 +885,46 @@ function ProviderRow({
                 belum di-set
               </span>
             )}
-            {cred.hasKey && cred.priority !== null && (
+            {cred.hasKey && cred.provider === "openrouter" ? (
+              <span className="text-[10px] text-muted">fallback terakhir</span>
+            ) : cred.hasKey && cred.priority !== null ? (
               <span className="text-[10px] text-muted">
                 priority {cred.priority}
               </span>
-            )}
+            ) : null}
           </div>
           <div className="text-[11px] text-muted">{howto.freeTier}</div>
+          {cooling && (
+            <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-0.5">
+              Cooldown sampai {fmtDate(cred.cooldownUntil!)}
+              {cred.lastError ? ` · ${cred.lastError}` : ""}
+            </div>
+          )}
         </div>
 
         {/* Priority controls + power toggle */}
         {cred.hasKey && (
           <div className="flex items-center gap-1 shrink-0">
-            <button
-              onClick={() => changePriority(-10)}
-              disabled={busy !== null}
-              title="Naikkan priority (rotasi duluan)"
-              className="btn-ghost p-1.5"
-            >
-              <ArrowUp className="size-3.5" />
-            </button>
-            <button
-              onClick={() => changePriority(10)}
-              disabled={busy !== null}
-              title="Turunkan priority"
-              className="btn-ghost p-1.5"
-            >
-              <ArrowDown className="size-3.5" />
-            </button>
+            {cred.provider !== "openrouter" && (
+              <>
+                <button
+                  onClick={() => changePriority(-10)}
+                  disabled={busy !== null}
+                  title="Naikkan priority fallback"
+                  className="btn-ghost p-1.5"
+                >
+                  <ArrowUp className="size-3.5" />
+                </button>
+                <button
+                  onClick={() => changePriority(10)}
+                  disabled={busy !== null}
+                  title="Turunkan priority"
+                  className="btn-ghost p-1.5"
+                >
+                  <ArrowDown className="size-3.5" />
+                </button>
+              </>
+            )}
             <button
               onClick={toggleEnabled}
               disabled={busy !== null}
@@ -1022,6 +1090,7 @@ function ProviderRow({
 // =================== SKU SECTION ===================
 
 function SkuSection({ initialSkus }: { initialSkus: Sku[] }) {
+  const dialog = useDialog();
   const [skus, setSkus] = useState<Sku[]>(initialSkus);
   const [kode, setKode] = useState("");
   const [kategori, setKategori] = useState("");
@@ -1072,7 +1141,13 @@ function SkuSection({ initialSkus }: { initialSkus: Sku[] }) {
   }
 
   async function remove(id: string) {
-    if (!confirm("Hapus mapping ini?")) return;
+    if (
+      !(await dialog.confirm("Mapping SKU ini akan dihapus.", {
+        title: "Hapus mapping?",
+        confirmText: "Ya, hapus",
+        variant: "danger",
+      }))
+    ) return;
     const supabase = createClient();
     const { error } = await supabase
       .from("sku_mappings")

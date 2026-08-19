@@ -15,12 +15,14 @@ import { createClient } from "@/lib/supabase/client";
 import type { Account } from "@/lib/types";
 import { CONTAINER_COLORS, colorOf } from "@/lib/colors";
 import { cn } from "@/lib/utils";
+import { useDialog } from "@/components/DialogProvider";
 
 const FB_URL = "https://www.facebook.com/";
 const MAC_URL =
   "https://addons.mozilla.org/en-US/firefox/addon/multi-account-containers/";
 
 export default function AccountsClient({ initial }: { initial: Account[] }) {
+  const dialog = useDialog();
   const [accounts, setAccounts] = useState<Account[]>(initial);
   const [nama, setNama] = useState("");
   const [catatan, setCatatan] = useState("");
@@ -71,10 +73,22 @@ export default function AccountsClient({ initial }: { initial: Account[] }) {
   }
 
   async function remove(id: string) {
-    if (!confirm("Hapus akun ini?")) return;
+    if (
+      !(await dialog.confirm(
+        "Akun dan assignment yang terhubung akan ikut terhapus.",
+        {
+          title: "Hapus akun?",
+          confirmText: "Ya, hapus",
+          variant: "danger",
+        }
+      ))
+    ) return;
     const supabase = createClient();
     const { error } = await supabase.from("accounts").delete().eq("id", id);
-    if (error) return alert(error.message);
+    if (error) {
+      await dialog.alert(error.message, { title: "Gagal menghapus", variant: "danger" });
+      return;
+    }
     setAccounts((prev) => prev.filter((a) => a.id !== id));
   }
 
@@ -84,7 +98,10 @@ export default function AccountsClient({ initial }: { initial: Account[] }) {
       .from("accounts")
       .update({ warna: newWarna })
       .eq("id", id);
-    if (error) return alert(error.message);
+    if (error) {
+      await dialog.alert(error.message, { title: "Gagal menyimpan", variant: "danger" });
+      return;
+    }
     setAccounts((prev) =>
       prev.map((a) => (a.id === id ? { ...a, warna: newWarna } : a))
     );

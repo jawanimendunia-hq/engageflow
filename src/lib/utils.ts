@@ -14,6 +14,20 @@ export function fmtDate(iso: string) {
   }
 }
 
+export function fmtDateTime(iso: string) {
+  try {
+    return new Date(iso).toLocaleString("id-ID", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
 export function parseBulkLinks(raw: string): { url: string; kategori: string }[] {
   // Format yang didukung:
   //   https://example.com | kategori

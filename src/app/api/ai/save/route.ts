@@ -10,7 +10,7 @@ import {
 
 /**
  * POST /api/ai/save
- *   { provider: "gemini"|"cerebras"|"groq", api_key, model?, priority?, enabled? }
+ *   { provider: "gemini"|"cerebras"|"groq"|"openrouter", api_key, model?, priority?, enabled? }
  * Validate via provider.test, encrypt, upsert.
  */
 export async function POST(req: Request) {
@@ -78,6 +78,9 @@ export async function POST(req: Request) {
       model: usedModel,
       priority: priority ?? PROVIDER_DEFAULT_PRIORITY[providerName],
       enabled: enabled ?? true,
+      cooldown_until: null,
+      last_error: null,
+      consecutive_errors: 0,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "user_id,provider" }
@@ -116,6 +119,11 @@ export async function PATCH(req: Request) {
   if (typeof enabled === "boolean") patch.enabled = enabled;
   if (typeof priority === "number") patch.priority = priority;
   if (typeof model === "string" && model.trim()) patch.model = model.trim();
+  if (enabled === true || (typeof model === "string" && model.trim())) {
+    patch.cooldown_until = null;
+    patch.last_error = null;
+    patch.consecutive_errors = 0;
+  }
 
   const { error } = await supabase
     .from("ai_credentials")

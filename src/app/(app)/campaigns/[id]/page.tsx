@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { ArrowLeft, Play, Link2 } from "lucide-react";
 import CampaignDetailClient from "./CampaignDetailClient";
+import DeleteCampaignButton from "../DeleteCampaignButton";
 
 export const dynamic = "force-dynamic";
 
@@ -84,6 +85,11 @@ export default async function CampaignDetailPage({
           </p>
         </div>
         <div className="flex gap-2">
+          <DeleteCampaignButton
+            campaignId={campaign.id}
+            campaignName={campaign.nama}
+            redirectAfterDelete
+          />
           <Link
             href={`/campaigns/${campaign.id}/execute`}
             className="btn-primary"

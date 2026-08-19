@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Search,
   X,
@@ -89,6 +89,7 @@ export default function MetaImportModal({
   const [progress, setProgress] = useState<Record<string, RowProgress>>({});
   const [currentIdx, setCurrentIdx] = useState(0);
   const [cancelled, setCancelled] = useState(false);
+  const cancelledRef = useRef(false);
   const [doneSummary, setDoneSummary] = useState<{
     linksOk: number;
     commentsTotal: number;
@@ -125,6 +126,7 @@ export default function MetaImportModal({
       setProgress({});
       setCurrentIdx(0);
       setCancelled(false);
+      cancelledRef.current = false;
       setDoneSummary(null);
     }
   }, [open]);
@@ -306,6 +308,7 @@ export default function MetaImportModal({
     setStep("importing");
     setCurrentIdx(0);
     setCancelled(false);
+    cancelledRef.current = false;
 
     // Init progress
     const initProg: Record<string, RowProgress> = {};
@@ -321,7 +324,7 @@ export default function MetaImportModal({
 
     // Sequential processing
     for (let i = 0; i < rows.length; i++) {
-      if (cancelled) break;
+      if (cancelledRef.current) break;
       setCurrentIdx(i);
       const { ad, kategori } = rows[i];
 
@@ -375,20 +378,38 @@ export default function MetaImportModal({
           if (r.ok) {
             generated = data.comments ?? [];
             usedProvider = data.used_provider_label ?? data.used_provider;
+            const fallbackInfo = [
+              ...(data.failed_providers ?? []).map(
+                (f: any) => `${f.provider} cooldown ${f.retry_after_sec}s`
+              ),
+              ...(data.cooling_providers ?? []).map(
+                (f: any) => `${f.provider} cooldown ${f.retryAfterSec}s`
+              ),
+            ].join(", ");
+            if (fallbackInfo) {
+              updateProgress(ad.ad_id, {
+                status: "generating",
+                message: `Fallback aktif: ${fallbackInfo}`,
+              });
+            }
             break;
           }
-          // Semua provider gagal & ada yang rate-limited → wait, retry
-          if (data.all_failed && data.rate_limited && attempt <= 2) {
-            const waitSec = 60; // semua habis, tunggu 1 menit
+          // Retry hanya untuk cooldown pendek. Daily limit tidak ditunggu di UI.
+          const waitSec = Math.max(1, Number(data.retry_after_sec ?? 60));
+          if (data.rate_limited && waitSec <= 120 && attempt <= 2) {
             updateProgress(ad.ad_id, {
               status: "rate-limited",
-              message: `Semua AI habis limit (${data.failed_providers
+              message: `Provider tersedia lagi dalam ${waitSec}s (${data.failed_providers
                 ?.map((f: any) => f.provider)
-                .join(", ")}), tunggu ${waitSec}s (attempt ${attempt}/2)`,
+                .join(", ") || "cooldown"}), percobaan ${attempt}/2`,
             });
-            await sleep(waitSec * 1000);
-            if (cancelled) break;
+            await sleep((waitSec + Math.random() * 2) * 1000);
+            if (cancelledRef.current) break;
             continue;
+          }
+          if (data.rate_limited && waitSec > 120) {
+            cancelledRef.current = true;
+            setCancelled(true);
           }
           // Error non-recoverable
           const detail = data.failed_providers
@@ -396,7 +417,7 @@ export default function MetaImportModal({
             .join(" | ");
           throw new Error(detail || data.error || "AI gagal");
         }
-        if (cancelled) break;
+        if (cancelledRef.current) break;
 
         if (generated.length === 0) {
           throw new Error("AI tidak mengembalikan komentar");
@@ -436,10 +457,9 @@ export default function MetaImportModal({
         linksOk++;
         commentsTotal += assignmentRows.length;
 
-        // 5) Throttle ringan 1.5s antar request — dengan 3 provider rotasi
-        // (effective ~75 RPM kombinasi), tidak perlu wait lama
+        // 5) Pace konservatif free-tier: 8–12 detik dengan jitter.
         if (i < rows.length - 1) {
-          await sleep(1500);
+          await sleep(8000 + Math.random() * 4000);
         }
       } catch (e: any) {
         updateProgress(ad.ad_id, {
@@ -457,6 +477,11 @@ export default function MetaImportModal({
   function finishAndClose() {
     onComplete();
     onClose();
+  }
+
+  function cancelImport() {
+    cancelledRef.current = true;
+    setCancelled(true);
   }
 
   const eligibleCount = ads.filter((a) => a.post_url).length;
@@ -908,7 +933,7 @@ export default function MetaImportModal({
                 )}
                 {useAi && readyCount > 0 && (
                   <span className="ml-2 text-accent">
-                    · estimasi {Math.ceil((readyCount * 1.5) / 60)} menit (AI)
+                    · estimasi {Math.max(1, Math.ceil((readyCount * 10) / 60))} menit (AI free-tier)
                   </span>
                 )}
               </div>
@@ -943,7 +968,7 @@ export default function MetaImportModal({
             progress={progress}
             currentIdx={currentIdx}
             cancelled={cancelled}
-            onCancel={() => setCancelled(true)}
+            onCancel={cancelImport}
           />
         )}
 

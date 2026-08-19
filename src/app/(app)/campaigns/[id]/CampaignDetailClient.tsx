@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -12,12 +12,17 @@ import {
   CheckCircle2,
   Sparkles,
   FileSpreadsheet,
+  Save,
+  StickyNote,
+  RotateCcw,
+  CheckCheck,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type { Account, Campaign, LinkRow } from "@/lib/types";
-import { parseBulkLinks, cn } from "@/lib/utils";
+import { parseBulkLinks, cn, fmtDateTime } from "@/lib/utils";
 import { buildAssignments } from "@/lib/assignment";
 import MetaImportModal from "./MetaImportModal";
+import { useDialog } from "@/components/DialogProvider";
 
 interface Props {
   campaign: Campaign;
@@ -39,6 +44,7 @@ export default function CampaignDetailClient({
   accounts,
 }: Props) {
   const router = useRouter();
+  const dialog = useDialog();
   const [links, setLinks] = useState<LinkRow[]>(initialLinks);
   const [counts, setCounts] = useState(assignmentCounts);
   const [showAdd, setShowAdd] = useState(initialLinks.length === 0);
@@ -46,6 +52,13 @@ export default function CampaignDetailClient({
   const [bulkText, setBulkText] = useState("");
   const [singleUrl, setSingleUrl] = useState("");
   const [singleKat, setSingleKat] = useState("");
+  const [note, setNote] = useState(campaign.catatan ?? "");
+  const [savedNote, setSavedNote] = useState(campaign.catatan ?? "");
+  const [lastUpdated, setLastUpdated] = useState(
+    campaign.updated_at ?? campaign.created_at
+  );
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [statusBusy, setStatusBusy] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(
     null
@@ -56,6 +69,11 @@ export default function CampaignDetailClient({
     setMsg({ kind, text });
     setTimeout(() => setMsg(null), 4000);
   }
+
+  useEffect(() => {
+    setLinks(initialLinks);
+    setCounts(assignmentCounts);
+  }, [initialLinks, assignmentCounts]);
 
   async function addBulk() {
     const parsed = parseBulkLinks(bulkText);
@@ -110,7 +128,16 @@ export default function CampaignDetailClient({
   }
 
   async function removeLink(id: string) {
-    if (!confirm("Hapus link ini? Assignment-nya juga akan dihapus.")) return;
+    if (
+      !(await dialog.confirm(
+        "Link dan seluruh assignment di dalamnya akan ikut dihapus.",
+        {
+          title: "Hapus link?",
+          confirmText: "Ya, hapus",
+          variant: "danger",
+        }
+      ))
+    ) return;
     const supabase = createClient();
     const { error } = await supabase.from("links").delete().eq("id", id);
     if (error) {
@@ -119,6 +146,126 @@ export default function CampaignDetailClient({
     }
     setLinks((prev) => prev.filter((l) => l.id !== id));
     notify("ok", "Link dihapus");
+  }
+
+  async function saveNote() {
+    setNoteSaving(true);
+    const supabase = createClient();
+    const { data, error } = await supabase
+      .from("campaigns")
+      .update({ catatan: note.trim() || null })
+      .eq("id", campaign.id)
+      .select("updated_at")
+      .single();
+    setNoteSaving(false);
+
+    if (error) {
+      notify("err", error.message);
+      return;
+    }
+
+    const normalizedNote = note.trim();
+    setNote(normalizedNote);
+    setSavedNote(normalizedNote);
+    setLastUpdated(data.updated_at);
+    notify("ok", "Catatan campaign disimpan");
+    startTransition(() => router.refresh());
+  }
+
+  async function setLinkCompleted(link: LinkRow, completed: boolean) {
+    const completesWholeCampaign =
+      completed &&
+      links.every((item) => item.id === link.id || item.status === "selesai");
+
+    if (
+      completesWholeCampaign &&
+      !(await dialog.confirm(
+        "Ini adalah link terakhir. Setelah campaign selesai, assignment komentar AI akan dihapus permanen untuk menghemat database.",
+        {
+          title: "Selesaikan campaign?",
+          confirmText: "Selesaikan",
+          variant: "danger",
+        }
+      ))
+    ) {
+      return;
+    }
+
+    if (
+      !completed &&
+      !(await dialog.confirm(
+        "Assignment dari bank komentar akan kembali ke pending, tetapi komentar AI yang sudah dibersihkan tidak dapat dipulihkan.",
+        {
+          title: "Buka kembali link?",
+          confirmText: "Buka kembali",
+        }
+      ))
+    ) {
+      return;
+    }
+
+    setStatusBusy(link.id);
+    const supabase = createClient();
+    const { error } = await supabase.rpc("set_link_manual_completion", {
+      p_link_id: link.id,
+      p_completed: completed,
+    });
+    setStatusBusy(null);
+
+    if (error) {
+      notify("err", error.message);
+      return;
+    }
+
+    setLinks((prev) =>
+      prev.map((item) =>
+        item.id === link.id
+          ? { ...item, status: completed ? "selesai" : "pending" }
+          : item
+      )
+    );
+    notify(
+      "ok",
+      completed ? "Link ditandai selesai" : "Link dikembalikan ke pending"
+    );
+    startTransition(() => router.refresh());
+  }
+
+  async function completeCampaign() {
+    if (links.length === 0) {
+      notify("err", "Belum ada link di campaign ini.");
+      return;
+    }
+    if (
+      !(await dialog.confirm(
+        "Semua link akan dianggap sudah dikerjakan dan assignment komentar AI akan dihapus permanen untuk menghemat database.",
+        {
+          title: "Selesaikan seluruh campaign?",
+          confirmText: "Ya, selesaikan",
+          variant: "danger",
+        }
+      ))
+    ) {
+      return;
+    }
+
+    setStatusBusy("campaign");
+    const supabase = createClient();
+    const { error } = await supabase.rpc("set_campaign_manual_completion", {
+      p_campaign_id: campaign.id,
+    });
+    setStatusBusy(null);
+
+    if (error) {
+      notify("err", error.message);
+      return;
+    }
+
+    setLinks((prev) =>
+      prev.map((link) => ({ ...link, status: "selesai" as const }))
+    );
+    notify("ok", "Seluruh campaign ditandai selesai");
+    startTransition(() => router.refresh());
   }
 
   async function runAssignment() {
@@ -233,6 +380,8 @@ export default function CampaignDetailClient({
 
   const totalAsg = Object.values(counts).reduce((s, v) => s + v, 0);
   const linksWithoutAsg = links.filter((l) => (counts[l.id] ?? 0) === 0).length;
+  const allLinksCompleted =
+    links.length > 0 && links.every((link) => link.status === "selesai");
 
   return (
     <div className="space-y-6">
@@ -254,14 +403,63 @@ export default function CampaignDetailClient({
         </div>
       )}
 
+      <div className="card p-5">
+        <div className="flex flex-wrap items-start justify-between gap-2 mb-3">
+          <div>
+            <h3 className="text-sm font-semibold flex items-center gap-2">
+              <StickyNote className="size-4" /> Catatan campaign
+            </h3>
+            <p className="text-xs text-muted mt-1">
+              Terakhir diubah {fmtDateTime(lastUpdated)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={saveNote}
+            disabled={noteSaving || note === savedNote}
+            className="btn-secondary"
+          >
+            <Save className="size-4" />
+            {noteSaving ? "Menyimpan..." : "Simpan catatan"}
+          </button>
+        </div>
+        <textarea
+          className="input min-h-[100px]"
+          placeholder="Tulis perubahan terakhir, target berikutnya, atau hal yang perlu diingat..."
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+        />
+      </div>
+
       <div className="card p-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="text-sm text-muted">
-          {totalAsg} assignment ·{" "}
-          <span className={linksWithoutAsg > 0 ? "text-yellow-600 dark:text-yellow-400" : ""}>
-            {linksWithoutAsg} link belum di-assign
-          </span>
+        <div>
+          <div className="text-sm text-muted">
+            {totalAsg} assignment ·{" "}
+            <span className={linksWithoutAsg > 0 ? "text-yellow-600 dark:text-yellow-400" : ""}>
+              {linksWithoutAsg} link belum di-assign
+            </span>
+          </div>
+          <div className="text-xs text-muted mt-1">
+            Assignment AI otomatis dibersihkan setelah seluruh campaign selesai.
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={completeCampaign}
+            disabled={
+              statusBusy !== null || links.length === 0 || allLinksCompleted
+            }
+            className="btn-secondary"
+            title="Dipakai jika seluruh komentar dikerjakan manual di luar Mode Eksekusi"
+          >
+            <CheckCheck className="size-4" />
+            {allLinksCompleted
+              ? "Campaign selesai"
+              : statusBusy === "campaign"
+                ? "Menyimpan..."
+                : "Tandai campaign selesai"}
+          </button>
           {metaConnected ? (
             <button
               onClick={() => setShowMeta(true)}
@@ -374,19 +572,20 @@ export default function CampaignDetailClient({
           Belum ada link. Tambahkan dulu lalu generate assignment.
         </div>
       ) : (
-        <div className="card overflow-hidden">
-          <div className="grid grid-cols-[1fr_140px_100px_100px_44px] gap-3 px-4 py-2 text-xs text-muted border-b border-border bg-bg-elev/40">
+        <div className="card overflow-x-auto">
+          <div className="grid min-w-[920px] grid-cols-[minmax(260px,1fr)_140px_100px_100px_150px_44px] gap-3 px-4 py-2 text-xs text-muted border-b border-border bg-bg-elev/40">
             <div>URL</div>
             <div>Kategori</div>
             <div>Status</div>
             <div>Komentar</div>
+            <div>Selesai manual</div>
             <div></div>
           </div>
           <div className="divide-y divide-border">
             {links.map((l) => (
               <div
                 key={l.id}
-                className="grid grid-cols-[1fr_140px_100px_100px_44px] gap-3 px-4 py-2.5 items-center"
+                className="grid min-w-[920px] grid-cols-[minmax(260px,1fr)_140px_100px_100px_150px_44px] gap-3 px-4 py-2.5 items-center"
               >
                 <a
                   href={l.url}
@@ -409,8 +608,36 @@ export default function CampaignDetailClient({
                   </span>
                 </div>
                 <div className="text-xs text-muted">
-                  {counts[l.id] ?? 0} / {campaign.komentar_per_link}
+                  {l.status === "selesai"
+                    ? "selesai"
+                    : `${counts[l.id] ?? 0} / ${campaign.komentar_per_link}`}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setLinkCompleted(l, l.status !== "selesai")}
+                  disabled={statusBusy !== null}
+                  className={cn(
+                    "btn-ghost justify-start px-2 text-xs",
+                    l.status !== "selesai" &&
+                      "text-emerald-600 dark:text-emerald-400"
+                  )}
+                  title={
+                    l.status === "selesai"
+                      ? "Kembalikan link dan assignment ke pending"
+                      : "Anggap komentar untuk link ini sudah dikerjakan manual"
+                  }
+                >
+                  {l.status === "selesai" ? (
+                    <RotateCcw className="size-3.5" />
+                  ) : (
+                    <CheckCircle2 className="size-3.5" />
+                  )}
+                  {statusBusy === l.id
+                    ? "Menyimpan..."
+                    : l.status === "selesai"
+                      ? "Buka lagi"
+                      : "Tandai selesai"}
+                </button>
                 <button
                   onClick={() => removeLink(l.id)}
                   className="text-muted hover:text-red-600 dark:text-red-400 p-1"

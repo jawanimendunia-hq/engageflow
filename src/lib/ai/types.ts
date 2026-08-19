@@ -4,7 +4,8 @@
 
 export type Tone = "pertanyaan" | "santai" | "testimoni" | "reaksi";
 
-export type ProviderName = "gemini" | "cerebras" | "groq";
+export type ProviderName = "gemini" | "cerebras" | "groq" | "openrouter";
+export type RateLimitScope = "minute" | "tokens" | "daily" | "unknown";
 
 export interface GeneratedComment {
   isi: string;
@@ -30,6 +31,7 @@ export class ProviderRateLimitError extends Error {
   constructor(
     public provider: ProviderName,
     public retryAfterSec: number = 60,
+    public scope: RateLimitScope = "unknown",
     msg?: string
   ) {
     super(msg ?? `${provider} rate limited (retry in ${retryAfterSec}s)`);
@@ -68,4 +70,12 @@ export interface ProviderCred {
   model: string;
   priority: number;
   enabled: boolean;
+}
+
+export interface ProviderFailure {
+  provider: ProviderName;
+  reason: string;
+  rateLimited: boolean;
+  retryAfterSec: number;
+  scope: RateLimitScope;
 }

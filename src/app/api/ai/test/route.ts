@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { decrypt } from "@/lib/encryption";
+import { markCredentialUsed } from "@/lib/ai-creds";
 import { PROVIDERS, PROVIDER_LIST, type ProviderName } from "@/lib/ai";
 
 /**
@@ -30,7 +31,7 @@ export async function GET(req: Request) {
 
   const { data, error } = await supabase
     .from("ai_credentials")
-    .select("api_key_encrypted, model")
+    .select("id, api_key_encrypted, model")
     .eq("user_id", user.id)
     .eq("provider", providerName)
     .maybeSingle();
@@ -56,6 +57,7 @@ export async function GET(req: Request) {
   if (!result.ok) {
     return NextResponse.json({ error: result.reason }, { status: 400 });
   }
+  await markCredentialUsed(data.id);
   return NextResponse.json({
     ok: true,
     reply: result.reply,

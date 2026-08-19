@@ -3,6 +3,7 @@ import { decrypt } from "@/lib/encryption";
 import {
   PROVIDERS,
   type ProviderCred,
+  type ProviderFailure,
   type ProviderName,
 } from "@/lib/ai";
 
@@ -11,11 +12,12 @@ import {
  * Hasilnya siap dipakai untuk generateWithRotation.
  */
 export async function loadAiCreds(): Promise<
-  | { error: string; status: number }
+  | { error: string; status: number; retryAfterSec?: number }
   | {
       user: { id: string };
       supabase: ReturnType<typeof createClient>;
       creds: ProviderCred[];
+      coolingProviders: { provider: ProviderName; retryAfterSec: number }[];
     }
 > {
   const supabase = createClient();
@@ -26,7 +28,9 @@ export async function loadAiCreds(): Promise<
 
   const { data, error } = await supabase
     .from("ai_credentials")
-    .select("id, provider, api_key_encrypted, model, priority, enabled")
+    .select(
+      "id, provider, api_key_encrypted, model, priority, enabled, cooldown_until"
+    )
     .eq("user_id", user.id)
     .eq("enabled", true)
     .order("priority", { ascending: true });
@@ -45,10 +49,23 @@ export async function loadAiCreds(): Promise<
 
   const creds: ProviderCred[] = [];
   const decryptErrors: string[] = [];
+  const coolingProviders: { provider: ProviderName; retryAfterSec: number }[] = [];
+  const now = Date.now();
 
   for (const row of data) {
     const provider = row.provider as ProviderName;
     if (!PROVIDERS[provider]) continue; // unknown provider
+
+    const cooldownUntil = row.cooldown_until
+      ? new Date(row.cooldown_until).getTime()
+      : 0;
+    if (cooldownUntil > now) {
+      coolingProviders.push({
+        provider,
+        retryAfterSec: Math.max(1, Math.ceil((cooldownUntil - now) / 1000)),
+      });
+      continue;
+    }
 
     let apiKey: string;
     try {
@@ -69,6 +86,14 @@ export async function loadAiCreds(): Promise<
   }
 
   if (creds.length === 0) {
+    if (coolingProviders.length > 0) {
+      const earliest = Math.min(...coolingProviders.map((p) => p.retryAfterSec));
+      return {
+        error: `Semua AI provider sedang cooldown. Coba lagi dalam ${earliest} detik.`,
+        status: 429,
+        retryAfterSec: earliest,
+      };
+    }
     return {
       error: `Gagal decrypt semua API key${
         decryptErrors.length > 0 ? ` (${decryptErrors.join(", ")})` : ""
@@ -77,17 +102,46 @@ export async function loadAiCreds(): Promise<
     };
   }
 
-  return { user, supabase, creds };
+  return { user, supabase, creds, coolingProviders };
 }
 
 /**
- * Update last_used_at untuk provider tertentu (fire-and-forget).
+ * Update last_used_at dan pulihkan circuit-breaker provider yang sukses.
  */
-export function markCredentialUsed(credId: string) {
+export async function markCredentialUsed(credId: string) {
   const supabase = createClient();
-  supabase
+  await supabase
     .from("ai_credentials")
-    .update({ last_used_at: new Date().toISOString() })
+    .update({
+      last_used_at: new Date().toISOString(),
+      cooldown_until: null,
+      last_error: null,
+      consecutive_errors: 0,
+    })
+    .eq("id", credId);
+}
+
+/** Simpan circuit-breaker agar request berikutnya tidak menghantam provider gagal. */
+export async function markCredentialFailure(
+  credId: string,
+  failure: ProviderFailure
+) {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("ai_credentials")
+    .select("consecutive_errors")
     .eq("id", credId)
-    .then(() => {});
+    .maybeSingle();
+
+  const cooldownUntil = new Date(
+    Date.now() + Math.max(1, failure.retryAfterSec) * 1000
+  ).toISOString();
+  await supabase
+    .from("ai_credentials")
+    .update({
+      cooldown_until: cooldownUntil,
+      last_error: failure.reason.slice(0, 1000),
+      consecutive_errors: (data?.consecutive_errors ?? 0) + 1,
+    })
+    .eq("id", credId);
 }

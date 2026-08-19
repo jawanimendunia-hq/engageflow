@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { loadAiCreds, markCredentialUsed } from "@/lib/ai-creds";
+import {
+  loadAiCreds,
+  markCredentialFailure,
+  markCredentialUsed,
+} from "@/lib/ai-creds";
 import {
   AllProvidersFailedError,
   generateWithRotation,
@@ -15,14 +19,21 @@ export const maxDuration = 60;
  * Body: { url, kategori, count, ad_name?, campaign_name?, primary_text?, headline?, description? }
  * Response: {
  *   comments: [{ isi, tone }],
- *   used_provider: "gemini" | "cerebras" | "groq",
+ *   used_provider: "gemini" | "cerebras" | "groq" | "openrouter",
  *   failed_providers: [{ provider, reason, rate_limited }]
  * }
  */
 export async function POST(req: Request) {
   const ctx = await loadAiCreds();
   if ("error" in ctx) {
-    return NextResponse.json({ error: ctx.error }, { status: ctx.status });
+    return NextResponse.json(
+      {
+        error: ctx.error,
+        rate_limited: ctx.status === 429,
+        retry_after_sec: ctx.retryAfterSec,
+      },
+      { status: ctx.status }
+    );
   }
 
   const body = await req.json().catch(() => ({}));
@@ -69,9 +80,17 @@ export async function POST(req: Request) {
       description,
     });
 
-    // Mark provider yang sukses sebagai last_used
+    // Persist circuit-breaker provider gagal dan reset provider yang sukses.
     const usedCred = ctx.creds.find((c) => c.provider === result.usedProvider);
-    if (usedCred) markCredentialUsed(usedCred.id);
+    await Promise.all([
+      usedCred ? markCredentialUsed(usedCred.id) : Promise.resolve(),
+      ...result.failedProviders.map((failure) => {
+        const cred = ctx.creds.find((c) => c.provider === failure.provider);
+        return cred
+          ? markCredentialFailure(cred.id, failure)
+          : Promise.resolve();
+      }),
+    ]);
 
     return NextResponse.json({
       comments: result.comments,
@@ -81,24 +100,41 @@ export async function POST(req: Request) {
         provider: f.provider,
         reason: f.reason,
         rate_limited: f.rateLimited,
+        retry_after_sec: f.retryAfterSec,
+        scope: f.scope,
       })),
+      cooling_providers: ctx.coolingProviders,
     });
   } catch (e) {
     if (e instanceof AllProvidersFailedError) {
+      await Promise.all(
+        e.failedProviders.map((failure) => {
+          const cred = ctx.creds.find((c) => c.provider === failure.provider);
+          return cred
+            ? markCredentialFailure(cred.id, failure)
+            : Promise.resolve();
+        })
+      );
       // Semua provider gagal — kalau ada yang rate-limited, sinyalkan
       const anyRateLimited = e.failedProviders.some((f) => f.rateLimited);
+      const retryAfterSec = Math.min(
+        ...e.failedProviders.map((f) => f.retryAfterSec)
+      );
       return NextResponse.json(
         {
           error: "Semua AI provider gagal / habis limit",
           all_failed: true,
           rate_limited: anyRateLimited,
+          retry_after_sec: retryAfterSec,
           failed_providers: e.failedProviders.map((f) => ({
             provider: f.provider,
             reason: f.reason,
             rate_limited: f.rateLimited,
+            retry_after_sec: f.retryAfterSec,
+            scope: f.scope,
           })),
         },
-        { status: 429 }
+        { status: anyRateLimited ? 429 : 502 }
       );
     }
     return NextResponse.json(

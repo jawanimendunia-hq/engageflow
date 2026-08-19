@@ -18,6 +18,7 @@ import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { suggestDelay } from "@/lib/assignment";
 import { colorOf } from "@/lib/colors";
+import { useDialog } from "@/components/DialogProvider";
 
 export interface EnrichedAssignment {
   id: string;
@@ -49,6 +50,7 @@ export default function ExecuteClient({
   assignments: initial,
   accounts,
 }: Props) {
+  const dialog = useDialog();
   const [assignments, setAssignments] = useState(initial);
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null);
   const [idx, setIdx] = useState(0);
@@ -138,7 +140,6 @@ export default function ExecuteClient({
     if (!current) return;
     const supabase = createClient();
     const finishedId = current.id;
-    const finishedLinkId = current.link_id;
 
     // 1) Optimistic: tandai assignment ini selesai di state
     setAssignments((prev) =>
@@ -156,25 +157,25 @@ export default function ExecuteClient({
     }
     // else idx tetap, item berikutnya otomatis menggantikan posisi current
 
-    // 3) Persist assignment selesai
-    await supabase
-      .from("assignments")
-      .update({ status: "selesai" })
-      .eq("id", finishedId);
+    // 3) Persist secara atomik: assignment → link → bersihkan komentar AI
+    // hanya jika seluruh campaign sudah selesai.
+    const { error } = await supabase.rpc("complete_assignment_and_cleanup", {
+      p_assignment_id: finishedId,
+    });
+    if (error) {
+      setAssignments((prev) =>
+        prev.map((a) =>
+          a.id === finishedId ? { ...a, status: "pending" as const } : a
+        )
+      );
+      await dialog.alert(`Gagal menandai selesai: ${error.message}`, {
+        title: "Proses gagal",
+        variant: "danger",
+      });
+      return;
+    }
 
-    // 4) Cek apakah semua assignment untuk link ini sudah selesai → set status link
-    const remaining = assignments.filter(
-      (a) =>
-        a.link_id === finishedLinkId &&
-        a.id !== finishedId &&
-        a.status === "pending"
-    );
-    await supabase
-      .from("links")
-      .update({ status: remaining.length === 0 ? "selesai" : "proses" })
-      .eq("id", finishedLinkId);
-
-    // 5) Auto-buka link berikutnya & copy komentarnya (dipicu dari klik user → tidak diblokir)
+    // 4) Auto-buka link berikutnya & copy komentarnya (dipicu dari klik user → tidak diblokir)
     const updatedAfter = assignments.map((a) =>
       a.id === finishedId ? { ...a, status: "selesai" as const } : a
     );
@@ -351,6 +352,11 @@ export default function ExecuteClient({
           "Selesai &amp; Lanjut", sistem akan otomatis membuka link berikutnya{" "}
           <em>di container yang sama</em> — jadi langsung logged in. Tinggal paste
           &amp; post.
+        </div>
+        <div className="mt-2 text-xs text-muted leading-relaxed">
+          Setelah seluruh campaign selesai, assignment komentar AI dihapus
+          otomatis untuk menghemat database. Export dahulu jika ingin menyimpan
+          riwayat komentarnya.
         </div>
       </div>
     );

@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/client";
 export default function NewCampaignPage() {
   const router = useRouter();
   const [nama, setNama] = useState("");
+  const [catatan, setCatatan] = useState("");
   const [perLink, setPerLink] = useState(5);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -28,7 +29,12 @@ export default function NewCampaignPage() {
     }
     const { data, error } = await supabase
       .from("campaigns")
-      .insert({ user_id: user.id, nama, komentar_per_link: perLink })
+      .insert({
+        user_id: user.id,
+        nama,
+        komentar_per_link: perLink,
+        catatan: catatan.trim() || null,
+      })
       .select()
       .single();
     setLoading(false);
@@ -63,6 +69,21 @@ export default function NewCampaignPage() {
             value={nama}
             onChange={(e) => setNama(e.target.value)}
           />
+        </div>
+
+        <div>
+          <label className="text-xs text-muted mb-1 block">
+            Catatan (opsional)
+          </label>
+          <textarea
+            className="input min-h-[96px]"
+            placeholder="Contoh: Terakhir ubah target ke produk kacamata merah"
+            value={catatan}
+            onChange={(e) => setCatatan(e.target.value)}
+          />
+          <p className="text-xs text-muted mt-1">
+            Bisa diperbarui lagi dari halaman detail campaign.
+          </p>
         </div>
 
         <div>

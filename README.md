@@ -14,10 +14,11 @@ Workflow manager komentar media sosial. Aplikasi ini **TIDAK** melakukan auto-po
 - 🌗 Light / dark / system theme
 - 📊 Dashboard dengan ringkasan campaign, antrian per akun, stok komentar per kategori
 - 🗂️ Sistem campaign dengan jumlah komentar per link kustom
+- 📝 Catatan campaign, waktu perubahan terakhir, hapus campaign, dan penanda selesai manual
 - 🔗 Manajemen link bulk import + kategori
 - ✨ **Import dari Meta Ads** — auto-fetch link postingan iklan via Marketing API, by campaign name atau ad creative name (multi keyword + pagination)
 - 🏷️ **SKU dictionary** — auto-detect kategori dari kode SKU di nama campaign (mis. "KCM" → "kacamata")
-- 🤖 **AI Komentar (Gemini)** — opsional, auto-generate komentar saat import dari Meta Ads. Gemini baca isi postingan via URL context, bikin komentar variatif dengan tone berbeda. Free tier supported.
+- 🤖 **AI Komentar multi-provider** — opsional, auto-generate komentar saat import dari Meta Ads memakai Gemini, Cerebras, dan Groq dengan weighted rotation serta OpenRouter Free sebagai fallback terakhir. Free tier supported.
 - 👥 Manajemen banyak akun dengan warna container Firefox
 - 💬 Template komentar berbasis kategori + tone (pertanyaan/santai/testimoni/reaksi)
 - ⚙️ **Mesin assignment otomatis**: variasi tone, distribusi merata, urutan akun acak, tidak ada duplikasi per link
@@ -74,6 +75,12 @@ Buka **Supabase Dashboard → SQL Editor → New query**, paste seluruh isi `sup
 > 2. `supabase/migration_2026_05_07_meta_integration.sql` — tabel Meta credentials & SKU dictionary
 > 3. `supabase/migration_2026_05_08_multi_account.sql` — dukungan multi ad account
 > 4. `supabase/migration_2026_05_08_ai_credentials.sql` — tabel AI credentials (Gemini)
+> 5. `supabase/migration_2026_05_14_multi_ai_providers.sql` — Gemini + Cerebras + Groq
+> 6. `supabase/migration_2026_05_18_inline_ai_comments.sql` — komentar AI inline di assignment
+> 7. `supabase/migration_2026_08_19_free_ai_rotation.sql` — model free aktif + cooldown provider
+> 8. `supabase/migration_2026_08_19_openrouter_fallback.sql` — OpenRouter Free sebagai fallback terakhir
+> 9. `supabase/migration_2026_08_19_campaign_management.sql` — catatan, waktu perubahan, dan status selesai manual campaign
+> 10. `supabase/migration_2026_08_19_ai_comment_cleanup.sql` — hapus assignment AI otomatis setelah campaign selesai
 >
 > Semua migration idempotent (`if not exists`), aman dijalankan ulang.
 

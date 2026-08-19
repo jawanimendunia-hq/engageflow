@@ -6,7 +6,9 @@ export interface Campaign {
   user_id: string;
   nama: string;
   komentar_per_link: number;
+  catatan: string | null;
   created_at: string;
+  updated_at: string;
 }
 
 export interface LinkRow {

@@ -9,11 +9,13 @@ import {
   MessageSquare,
   LogOut,
   Settings,
+  LoaderCircle,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { ThemeToggle } from "./ThemeProvider";
 import { Logo } from "./Logo";
+import { useState } from "react";
 
 const items = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -26,8 +28,10 @@ const items = [
 export default function Sidebar({ email }: { email: string }) {
   const pathname = usePathname();
   const router = useRouter();
+  const [loggingOut, setLoggingOut] = useState(false);
 
   async function logout() {
+    setLoggingOut(true);
     const supabase = createClient();
     await supabase.auth.signOut();
     router.push("/login");
@@ -35,14 +39,14 @@ export default function Sidebar({ email }: { email: string }) {
   }
 
   return (
-    <aside className="w-60 shrink-0 border-r border-border bg-bg-elev flex flex-col">
+    <aside className="sticky top-0 flex h-dvh w-60 shrink-0 self-start flex-col overflow-hidden border-r border-border bg-bg-elev shadow-[8px_0_30px_rgba(15,23,42,0.03)]">
       <div className="p-5 border-b border-border flex items-center justify-center">
         <Link href="/dashboard" aria-label="EngageFlow — ke dashboard">
           <Logo size={56} className="text-fg" />
         </Link>
       </div>
 
-      <nav className="flex-1 p-3 space-y-1">
+      <nav className="min-h-0 flex-1 overflow-y-auto p-3 space-y-1">
         {items.map(({ href, label, icon: Icon }) => {
           const active =
             pathname === href ||
@@ -77,9 +81,15 @@ export default function Sidebar({ email }: { email: string }) {
         </div>
         <button
           onClick={logout}
+          disabled={loggingOut}
           className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-muted hover:text-fg hover:bg-bg-card/60"
         >
-          <LogOut className="size-4" /> Keluar
+          {loggingOut ? (
+            <LoaderCircle className="size-4 animate-spin" />
+          ) : (
+            <LogOut className="size-4" />
+          )}
+          {loggingOut ? "Keluar..." : "Keluar"}
         </button>
       </div>
     </aside>

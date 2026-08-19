@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import Sidebar from "@/components/Sidebar";
+import { DialogProvider } from "@/components/DialogProvider";
+import NavigationFeedback from "@/components/NavigationFeedback";
 
 export default async function AppLayout({
   children,
@@ -14,9 +16,12 @@ export default async function AppLayout({
   if (!user) redirect("/login");
 
   return (
-    <div className="min-h-screen flex">
-      <Sidebar email={user.email ?? ""} />
-      <div className="flex-1 min-w-0">{children}</div>
-    </div>
+    <DialogProvider>
+      <NavigationFeedback />
+      <div className="min-h-screen flex items-start">
+        <Sidebar email={user.email ?? ""} />
+        <main className="flex-1 min-w-0">{children}</main>
+      </div>
+    </DialogProvider>
   );
 }

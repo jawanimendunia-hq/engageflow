@@ -1,45 +1,45 @@
 /**
- * Groq provider — OpenAI-compatible Chat Completions API.
- * Endpoint: https://api.groq.com/openai/v1/chat/completions
- * Free tier bervariasi per model dan organisasi.
- *
- * Model gratis populer:
- * Model gratis utama: qwen/qwen3.6-27b
+ * OpenRouter Free Router — jaringan cadangan terakhir.
+ * Router memilih model gratis yang sedang tersedia dan mendukung JSON mode.
  */
 
 import { buildPrompt, parseCommentsJson } from "./prompt";
 import { outputTokenLimit, readRateLimit } from "./limits";
 import {
-  ProviderClient,
   ProviderError,
   ProviderRateLimitError,
   type GenerateArgs,
   type GeneratedComment,
+  type ProviderClient,
 } from "./types";
 
-const BASE = "https://api.groq.com/openai/v1/chat/completions";
-const NAME = "groq" as const;
+const BASE = "https://openrouter.ai/api/v1/chat/completions";
+const NAME = "openrouter" as const;
 
-export const groq: ProviderClient = {
+function headers(apiKey: string): Record<string, string> {
+  const out: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${apiKey}`,
+    "X-Title": "EngageFlow",
+  };
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+  if (siteUrl) out["HTTP-Referer"] = siteUrl;
+  return out;
+}
+
+export const openrouter: ProviderClient = {
   name: NAME,
-  defaultModel: "qwen/qwen3.6-27b",
+  defaultModel: "openrouter/free",
 
   async test(apiKey, model) {
     try {
       const res = await fetch(BASE, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
+        headers: headers(apiKey),
         body: JSON.stringify({
-          model,
+          model: model || "openrouter/free",
           messages: [{ role: "user", content: "Reply with exactly: PONG" }],
-          max_completion_tokens: 10,
-          ...(model.startsWith("qwen/") ? { reasoning_effort: "none" } : {}),
-          ...(model.startsWith("openai/gpt-oss-")
-            ? { reasoning_effort: "low", include_reasoning: false }
-            : {}),
+          max_tokens: 16,
         }),
       });
       const data = await res.json();
@@ -57,31 +57,21 @@ export const groq: ProviderClient = {
   },
 
   async generate(args: GenerateArgs, apiKey, model): Promise<GeneratedComment[]> {
-    const prompt = buildPrompt(args);
-
     const res = await fetch(BASE, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
+      headers: headers(apiKey),
       body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: prompt }],
+        model: model || "openrouter/free",
+        messages: [{ role: "user", content: buildPrompt(args) }],
         temperature: 0.95,
-        max_completion_tokens: outputTokenLimit(args.count),
+        max_tokens: outputTokenLimit(args.count),
         response_format: { type: "json_object" },
-        ...(model.startsWith("qwen/") ? { reasoning_effort: "none" } : {}),
-        ...(model.startsWith("openai/gpt-oss-")
-          ? { reasoning_effort: "low", include_reasoning: false }
-          : {}),
       }),
     });
-
     const data = await res.json();
 
     if (res.status === 429) {
-      const limit = readRateLimit(res, data);
+      const limit = readRateLimit(res, data, 60 * 60);
       throw new ProviderRateLimitError(
         NAME,
         limit.retryAfterSec,
@@ -90,12 +80,12 @@ export const groq: ProviderClient = {
       );
     }
 
-    if (res.status === 503 || res.status === 502) {
+    if ([502, 503, 504].includes(res.status)) {
       throw new ProviderRateLimitError(
         NAME,
-        30,
+        120,
         "minute",
-        data?.error?.message ?? "overloaded"
+        data?.error?.message ?? "Free router sementara tidak tersedia"
       );
     }
 
@@ -108,10 +98,7 @@ export const groq: ProviderClient = {
     }
 
     const text: string = data?.choices?.[0]?.message?.content ?? "";
-    if (!text) {
-      throw new ProviderError(NAME, 200, "Response kosong");
-    }
-
+    if (!text) throw new ProviderError(NAME, 200, "Response kosong");
     return parseCommentsJson(text);
   },
 };

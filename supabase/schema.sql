@@ -20,7 +20,9 @@ create table if not exists public.campaigns (
   user_id uuid not null references auth.users(id) on delete cascade,
   nama text not null,
   komentar_per_link int not null default 5,
-  created_at timestamptz default now()
+  catatan text,
+  created_at timestamptz default now(),
+  updated_at timestamptz not null default now()
 );
 
 create table if not exists public.links (
@@ -57,13 +59,15 @@ create table if not exists public.assignments (
   id uuid primary key default uuid_generate_v4(),
   link_id uuid not null references public.links(id) on delete cascade,
   account_id uuid not null references public.accounts(id) on delete cascade,
-  comment_id uuid not null references public.comments(id) on delete cascade,
+  comment_id uuid references public.comments(id) on delete cascade,
+  comment_text text,
+  comment_tone text,
   status text not null default 'pending'
     check (status in ('pending', 'selesai')),
   urutan int not null default 0,
   created_at timestamptz default now(),
   unique(link_id, account_id),
-  unique(link_id, comment_id)
+  check (comment_id is not null or (comment_text is not null and length(comment_text) > 0))
 );
 
 create table if not exists public.comment_usage (
@@ -97,13 +101,18 @@ create table if not exists public.sku_mappings (
   unique(user_id, kode)
 );
 
--- AI credentials (Gemini, dll)
+-- AI credentials + persisted circuit-breaker untuk free-tier
 create table if not exists public.ai_credentials (
   id uuid primary key default uuid_generate_v4(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  provider text not null check (provider in ('gemini')),
+  provider text not null check (provider in ('gemini', 'cerebras', 'groq', 'openrouter')),
   api_key_encrypted text not null,
-  model text default 'gemini-2.5-flash',
+  model text default 'gemini-2.5-flash-lite',
+  priority int not null default 100,
+  enabled boolean not null default true,
+  cooldown_until timestamptz,
+  last_error text,
+  consecutive_errors int not null default 0,
   last_used_at timestamptz,
   created_at timestamptz default now(),
   updated_at timestamptz default now(),
@@ -117,6 +126,10 @@ create index if not exists idx_comments_user_kat on public.comments(user_id, kat
 create index if not exists idx_assignments_link on public.assignments(link_id);
 create index if not exists idx_accounts_user on public.accounts(user_id);
 create index if not exists idx_sku_user on public.sku_mappings(user_id);
+create index if not exists idx_ai_creds_user_priority
+  on public.ai_credentials(user_id, enabled, priority);
+create index if not exists idx_ai_creds_available
+  on public.ai_credentials(user_id, enabled, cooldown_until, priority);
 
 -- ============= TRIGGER: profile auto-create =============
 create or replace function public.handle_new_user()
@@ -136,6 +149,157 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute procedure public.handle_new_user();
+
+-- Waktu perubahan terakhir campaign
+create or replace function public.touch_campaign_updated_at()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
+drop trigger if exists campaigns_touch_updated_at on public.campaigns;
+create trigger campaigns_touch_updated_at
+  before update on public.campaigns
+  for each row execute function public.touch_campaign_updated_at();
+
+-- Status manual dan cleanup komentar AI setelah seluruh campaign selesai
+create or replace function public.set_link_manual_completion(
+  p_link_id uuid,
+  p_completed boolean
+)
+returns void
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_campaign_id uuid;
+begin
+  select campaign_id into v_campaign_id
+  from public.links
+  where id = p_link_id;
+
+  if v_campaign_id is null then
+    raise exception 'Link tidak ditemukan atau tidak dapat diakses';
+  end if;
+
+  update public.assignments
+  set status = case when p_completed then 'selesai' else 'pending' end
+  where link_id = p_link_id;
+
+  update public.links
+  set status = case when p_completed then 'selesai' else 'pending' end
+  where id = p_link_id;
+
+  if p_completed and not exists (
+    select 1
+    from public.links
+    where campaign_id = v_campaign_id
+      and status <> 'selesai'
+  ) then
+    delete from public.assignments a
+    using public.links l
+    where a.link_id = l.id
+      and l.campaign_id = v_campaign_id
+      and a.comment_id is null;
+  end if;
+end;
+$$;
+
+create or replace function public.set_campaign_manual_completion(
+  p_campaign_id uuid
+)
+returns void
+language plpgsql
+set search_path = public
+as $$
+begin
+  if not exists (
+    select 1 from public.campaigns where id = p_campaign_id
+  ) then
+    raise exception 'Campaign tidak ditemukan atau tidak dapat diakses';
+  end if;
+
+  update public.assignments a
+  set status = 'selesai'
+  from public.links l
+  where a.link_id = l.id
+    and l.campaign_id = p_campaign_id;
+
+  update public.links
+  set status = 'selesai'
+  where campaign_id = p_campaign_id;
+
+  delete from public.assignments a
+  using public.links l
+  where a.link_id = l.id
+    and l.campaign_id = p_campaign_id
+    and a.comment_id is null;
+end;
+$$;
+
+create or replace function public.complete_assignment_and_cleanup(
+  p_assignment_id uuid
+)
+returns void
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_link_id uuid;
+  v_campaign_id uuid;
+begin
+  select a.link_id, l.campaign_id
+  into v_link_id, v_campaign_id
+  from public.assignments a
+  join public.links l on l.id = a.link_id
+  where a.id = p_assignment_id;
+
+  if v_link_id is null or v_campaign_id is null then
+    raise exception 'Assignment tidak ditemukan atau tidak dapat diakses';
+  end if;
+
+  update public.assignments
+  set status = 'selesai'
+  where id = p_assignment_id;
+
+  update public.links
+  set status = case
+    when exists (
+      select 1
+      from public.assignments
+      where link_id = v_link_id
+        and status = 'pending'
+    ) then 'proses'
+    else 'selesai'
+  end
+  where id = v_link_id;
+
+  if not exists (
+    select 1
+    from public.links
+    where campaign_id = v_campaign_id
+      and status <> 'selesai'
+  ) then
+    delete from public.assignments a
+    using public.links l
+    where a.link_id = l.id
+      and l.campaign_id = v_campaign_id
+      and a.comment_id is null;
+  end if;
+end;
+$$;
+
+revoke all on function public.set_link_manual_completion(uuid, boolean) from public;
+revoke all on function public.set_campaign_manual_completion(uuid) from public;
+revoke all on function public.complete_assignment_and_cleanup(uuid) from public;
+grant execute on function public.set_link_manual_completion(uuid, boolean) to authenticated;
+grant execute on function public.set_campaign_manual_completion(uuid) to authenticated;
+grant execute on function public.complete_assignment_and_cleanup(uuid) to authenticated;
 
 -- ============= ROW LEVEL SECURITY =============
 alter table public.profiles    enable row level security;
