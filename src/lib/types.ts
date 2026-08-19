@@ -16,6 +16,7 @@ export interface LinkRow {
   campaign_id: string;
   url: string;
   kategori: string;
+  source_keywords: string[];
   status: LinkStatus;
   created_at: string;
 }

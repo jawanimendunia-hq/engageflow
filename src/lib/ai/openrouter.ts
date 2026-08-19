@@ -16,6 +16,37 @@ import {
 const BASE = "https://openrouter.ai/api/v1/chat/completions";
 const NAME = "openrouter" as const;
 
+function commentResponseFormat(count: number) {
+  return {
+    type: "json_schema",
+    json_schema: {
+      name: "engageflow_comments",
+      strict: true,
+      schema: {
+        type: "object",
+        properties: {
+          comments: {
+            type: "array",
+            minItems: count,
+            maxItems: count,
+            items: {
+              type: "object",
+              properties: {
+                isi: { type: "string" },
+                tone: { type: "string", enum: ["testimoni"] },
+              },
+              required: ["isi", "tone"],
+              additionalProperties: false,
+            },
+          },
+        },
+        required: ["comments"],
+        additionalProperties: false,
+      },
+    },
+  };
+}
+
 function headers(apiKey: string): Record<string, string> {
   const out: Record<string, string> = {
     "Content-Type": "application/json",
@@ -62,10 +93,19 @@ export const openrouter: ProviderClient = {
       headers: headers(apiKey),
       body: JSON.stringify({
         model: model || "openrouter/free",
-        messages: [{ role: "user", content: buildPrompt(args) }],
+        messages: [
+          {
+            role: "system",
+            content:
+              "Kamu adalah JSON API. Kembalikan hanya JSON sesuai schema, tanpa analisis, reasoning, markdown, atau teks pembuka.",
+          },
+          { role: "user", content: buildPrompt(args) },
+        ],
         temperature: 0.95,
         max_tokens: outputTokenLimit(args.count),
-        response_format: { type: "json_object" },
+        response_format: commentResponseFormat(args.count),
+        provider: { require_parameters: true },
+        plugins: [{ id: "response-healing" }],
       }),
     });
     const data = await res.json();
@@ -97,7 +137,13 @@ export const openrouter: ProviderClient = {
       );
     }
 
-    const text: string = data?.choices?.[0]?.message?.content ?? "";
+    const rawContent = data?.choices?.[0]?.message?.content;
+    const text: string =
+      typeof rawContent === "string"
+        ? rawContent
+        : Array.isArray(rawContent)
+          ? rawContent.map((part: any) => part?.text ?? "").join("")
+          : "";
     if (!text) throw new ProviderError(NAME, 200, "Response kosong");
     return parseCommentsJson(text);
   },

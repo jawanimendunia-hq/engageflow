@@ -16,6 +16,7 @@ Workflow manager komentar media sosial. Aplikasi ini **TIDAK** melakukan auto-po
 - 🗂️ Sistem campaign dengan jumlah komentar per link kustom
 - 📝 Catatan campaign, waktu perubahan terakhir, hapus campaign, dan penanda selesai manual
 - 🔗 Manajemen link bulk import + kategori
+- 🏷️ Riwayat keyword pencarian Meta pada setiap link
 - ✨ **Import dari Meta Ads** — auto-fetch link postingan iklan via Marketing API, by campaign name atau ad creative name (multi keyword + pagination)
 - 🏷️ **SKU dictionary** — auto-detect kategori dari kode SKU di nama campaign (mis. "KCM" → "kacamata")
 - 🤖 **AI Komentar multi-provider** — opsional, auto-generate komentar saat import dari Meta Ads memakai Gemini, Cerebras, dan Groq dengan weighted rotation serta OpenRouter Free sebagai fallback terakhir. Free tier supported.
@@ -81,6 +82,8 @@ Buka **Supabase Dashboard → SQL Editor → New query**, paste seluruh isi `sup
 > 8. `supabase/migration_2026_08_19_openrouter_fallback.sql` — OpenRouter Free sebagai fallback terakhir
 > 9. `supabase/migration_2026_08_19_campaign_management.sql` — catatan, waktu perubahan, dan status selesai manual campaign
 > 10. `supabase/migration_2026_08_19_ai_comment_cleanup.sql` — hapus assignment AI otomatis setelah campaign selesai
+> 11. `supabase/migration_2026_08_19_ai_provider_health.sql` — statistik sukses/gagal dan health provider
+> 12. `supabase/migration_2026_08_19_link_keywords.sql` — simpan keyword asal pada setiap link Meta
 >
 > Semua migration idempotent (`if not exists`), aman dijalankan ulang.
 

@@ -70,6 +70,8 @@ export interface ProviderCred {
   model: string;
   priority: number;
   enabled: boolean;
+  /** Dipakai untuk memilih fallback yang paling lama belum mendapat giliran. */
+  lastUsedAt?: string | null;
 }
 
 export interface ProviderFailure {

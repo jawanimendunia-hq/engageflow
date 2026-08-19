@@ -149,9 +149,27 @@ function weightedOrder(creds: ProviderCred[], args: GenerateArgs): ProviderCred[
       break;
     }
   }
+
+  // Provider utama tetap mengikuti bobot. Jika ia gagal, fallback bersifat
+  // adaptif: provider yang paling lama belum sukses dicoba lebih dahulu.
+  // Priority hanya menjadi tie-breaker, sehingga satu provider yang stabil
+  // tidak terus-menerus mengambil semua request fallback.
+  const adaptiveFallback = primary
+    .filter((cred) => cred.id !== selected.id)
+    .sort((a, b) => {
+      const aLast = a.lastUsedAt ? new Date(a.lastUsedAt).getTime() : 0;
+      const bLast = b.lastUsedAt ? new Date(b.lastUsedAt).getTime() : 0;
+      if (aLast !== bLast) return aLast - bLast;
+      // Jika sama-sama belum pernah dipakai, beri Gemini kesempatan sebelum
+      // Groq agar fallback awal tidak selalu jatuh ke provider yang sama.
+      if (a.provider === "gemini" && b.provider !== "gemini") return -1;
+      if (b.provider === "gemini" && a.provider !== "gemini") return 1;
+      return a.priority - b.priority;
+    });
+
   return [
     selected,
-    ...primary.filter((cred) => cred.id !== selected.id),
+    ...adaptiveFallback,
     ...fallbackOnly,
   ];
 }
@@ -215,11 +233,15 @@ export async function generateWithRotation(
           scope: e.scope,
         });
       } else if (e instanceof ProviderError) {
+        const needsAccountAction = [401, 402, 403].includes(e.status);
         failed.push({
           provider: cred.provider,
           reason: e.message,
           rateLimited: false,
-          retryAfterSec: [400, 401, 403, 404].includes(e.status) ? 3600 : 300,
+          // 402 berarti key/project meminta billing. Jangan dihantam ulang tiap
+          // beberapa menit; beri waktu user memperbaiki akun atau mengganti key.
+          retryAfterSec:
+            e.status === 402 ? 24 * 60 * 60 : needsAccountAction ? 3600 : 300,
           scope: "unknown",
         });
       } else {

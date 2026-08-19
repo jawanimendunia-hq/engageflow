@@ -573,8 +573,9 @@ export default function CampaignDetailClient({
         </div>
       ) : (
         <div className="card overflow-x-auto">
-          <div className="grid min-w-[920px] grid-cols-[minmax(260px,1fr)_140px_100px_100px_150px_44px] gap-3 px-4 py-2 text-xs text-muted border-b border-border bg-bg-elev/40">
+          <div className="grid min-w-[1100px] grid-cols-[minmax(260px,1fr)_180px_140px_100px_100px_150px_44px] gap-3 px-4 py-2 text-xs text-muted border-b border-border bg-bg-elev/40">
             <div>URL</div>
+            <div>Keyword</div>
             <div>Kategori</div>
             <div>Status</div>
             <div>Komentar</div>
@@ -585,7 +586,7 @@ export default function CampaignDetailClient({
             {links.map((l) => (
               <div
                 key={l.id}
-                className="grid min-w-[920px] grid-cols-[minmax(260px,1fr)_140px_100px_100px_150px_44px] gap-3 px-4 py-2.5 items-center"
+                className="grid min-w-[1100px] grid-cols-[minmax(260px,1fr)_180px_140px_100px_100px_150px_44px] gap-3 px-4 py-2.5 items-center"
               >
                 <a
                   href={l.url}
@@ -597,6 +598,21 @@ export default function CampaignDetailClient({
                   {l.url}
                   <ExternalLink className="size-3 shrink-0 opacity-60" />
                 </a>
+                <div className="flex flex-wrap gap-1">
+                  {(l.source_keywords ?? []).length > 0 ? (
+                    l.source_keywords.map((keyword) => (
+                      <span
+                        key={keyword.toLocaleLowerCase()}
+                        className="badge bg-accent/10 text-accent text-[10px]"
+                        title="Keyword pencarian Meta"
+                      >
+                        {keyword}
+                      </span>
+                    ))
+                  ) : (
+                    <span className="text-xs text-muted">—</span>
+                  )}
+                </div>
                 <div className="text-xs">
                   <span className="badge bg-bg-elev text-muted">
                     {l.kategori}

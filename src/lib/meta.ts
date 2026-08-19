@@ -10,6 +10,8 @@ export interface MetaCampaign {
   id: string;
   name: string;
   status: string; // ACTIVE, PAUSED, DELETED, ARCHIVED
+  /** Keyword input yang menghasilkan campaign ini. Bisa lebih dari satu. */
+  matched_keywords?: string[];
 }
 
 export interface MetaAd {
@@ -38,6 +40,8 @@ export interface MetaSearchResult {
   headline: string | null;
   /** Description iklan (link_data.description) */
   description: string | null;
+  /** Keyword input yang menghasilkan iklan/campaign ini. */
+  matched_keywords?: string[];
 }
 
 class MetaApiError extends Error {
@@ -161,7 +165,13 @@ export async function searchCampaignsBulk(
     keywords.map(async (kw) => {
       try {
         const rows = await searchCampaignsByName(token, adAccountId, kw);
-        for (const r of rows) seen.set(r.id, r);
+        for (const r of rows) {
+          const previous = seen.get(r.id);
+          seen.set(r.id, {
+            ...r,
+            matched_keywords: mergeKeywords(previous?.matched_keywords, [kw]),
+          });
+        }
       } catch (e: any) {
         errors.push(`"${kw}": ${e?.message ?? "gagal"}`);
       }
@@ -208,7 +218,13 @@ export async function searchAdsBulk(
     keywords.map(async (kw) => {
       try {
         const rows = await searchAdsByName(token, adAccountId, kw);
-        for (const r of rows) seen.set(r.ad_id, r);
+        for (const r of rows) {
+          const previous = seen.get(r.ad_id);
+          seen.set(r.ad_id, {
+            ...r,
+            matched_keywords: mergeKeywords(previous?.matched_keywords, [kw]),
+          });
+        }
       } catch (e: any) {
         errors.push(`"${kw}": ${e?.message ?? "gagal"}`);
       }
@@ -218,6 +234,24 @@ export async function searchAdsBulk(
     throw new Error(errors.join("; "));
   }
   return Array.from(seen.values());
+}
+
+/** Gabungkan keyword tanpa duplikat, case-insensitive, sambil menjaga ejaan input. */
+function mergeKeywords(
+  current: string[] | undefined,
+  incoming: string[]
+): string[] {
+  const out = [...(current ?? [])];
+  const seen = new Set(out.map((value) => value.trim().toLocaleLowerCase()));
+  for (const value of incoming) {
+    const normalized = value.trim();
+    const key = normalized.toLocaleLowerCase();
+    if (normalized && !seen.has(key)) {
+      seen.add(key);
+      out.push(normalized);
+    }
+  }
+  return out;
 }
 
 /**

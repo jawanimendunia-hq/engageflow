@@ -17,7 +17,11 @@ import {
   Clock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { detectKategoriFromSku, type MetaSearchResult } from "@/lib/meta";
+import {
+  detectKategoriFromSku,
+  type MetaCampaign,
+  type MetaSearchResult,
+} from "@/lib/meta";
 import { createClient } from "@/lib/supabase/client";
 import type { Account } from "@/lib/types";
 
@@ -53,6 +57,36 @@ interface RowProgress {
   used_provider?: string;
 }
 
+function mergeKeywordLists(
+  current: string[] | undefined,
+  incoming: string[] | undefined
+): string[] {
+  const merged = [...(current ?? []), ...(incoming ?? [])];
+  const seen = new Set<string>();
+  return merged.filter((keyword) => {
+    const key = keyword.trim().toLocaleLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function KeywordBadges({ keywords }: { keywords: string[] }) {
+  return (
+    <div className="flex flex-wrap gap-1 mt-1.5">
+      {keywords.map((keyword) => (
+        <span
+          key={keyword.toLocaleLowerCase()}
+          className="badge bg-accent/10 text-accent text-[10px]"
+          title="Keyword pencarian Meta"
+        >
+          {keyword}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export default function MetaImportModal({
   open,
   onClose,
@@ -69,9 +103,7 @@ export default function MetaImportModal({
 
   const [mode, setMode] = useState<Mode>("by-campaign");
   const [keywordsText, setKeywordsText] = useState("");
-  const [campaigns, setCampaigns] = useState<
-    { id: string; name: string; status: string }[]
-  >([]);
+  const [campaigns, setCampaigns] = useState<MetaCampaign[]>([]);
   const [ads, setAds] = useState<MetaSearchResult[]>([]);
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [overrides, setOverrides] = useState<Record<string, string>>({});
@@ -211,7 +243,14 @@ export default function MetaImportModal({
       const r = await fetch(`/api/meta/campaign-ads?${params.toString()}`);
       const d = await r.json();
       if (!r.ok) throw new Error(d.error ?? "Gagal");
-      const rows: MetaSearchResult[] = d.data ?? [];
+      const matchedKeywords =
+        campaigns.find((campaign) => campaign.id === id)?.matched_keywords ?? [];
+      const rows: MetaSearchResult[] = (d.data ?? []).map(
+        (ad: MetaSearchResult) => ({
+          ...ad,
+          matched_keywords: matchedKeywords,
+        })
+      );
       setAds(rows);
       setChosen(new Set(rows.filter((r) => r.post_url).map((r) => r.ad_id)));
       setStep("review");
@@ -237,10 +276,20 @@ export default function MetaImportModal({
         const r = await fetch(`/api/meta/campaign-ads?${params.toString()}`);
         const d = await r.json();
         if (r.ok) {
-          for (const ad of d.data ?? []) {
+          for (const ad of (d.data ?? []) as MetaSearchResult[]) {
+            const withKeywords: MetaSearchResult = {
+              ...ad,
+              matched_keywords: mergeKeywordLists(
+                all.find((item) => item.ad_id === ad.ad_id)?.matched_keywords,
+                c.matched_keywords
+              ),
+            };
             if (!seen.has(ad.ad_id)) {
               seen.add(ad.ad_id);
-              all.push(ad);
+              all.push(withKeywords);
+            } else {
+              const index = all.findIndex((item) => item.ad_id === ad.ad_id);
+              if (index >= 0) all[index] = withKeywords;
             }
           }
         }
@@ -337,6 +386,7 @@ export default function MetaImportModal({
             campaign_id: campaignId,
             url: ad.post_url!,
             kategori,
+            source_keywords: ad.matched_keywords ?? [],
             status: "pending",
           })
           .select()
@@ -720,6 +770,9 @@ export default function MetaImportModal({
                         <div className="text-[10px] text-muted mt-0.5 font-mono">
                           {c.status}
                         </div>
+                        {!!c.matched_keywords?.length && (
+                          <KeywordBadges keywords={c.matched_keywords} />
+                        )}
                       </div>
                       <ChevronRight className="size-4 text-muted shrink-0" />
                     </button>
@@ -812,6 +865,9 @@ export default function MetaImportModal({
                             <div className="text-[11px] text-muted truncate">
                               dari: {a.campaign_name}
                             </div>
+                            {!!a.matched_keywords?.length && (
+                              <KeywordBadges keywords={a.matched_keywords} />
+                            )}
                             {a.post_url ? (
                               <a
                                 href={a.post_url}

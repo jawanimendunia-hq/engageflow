@@ -22,7 +22,7 @@ import {
   ArrowDown,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { fmtDate, cn } from "@/lib/utils";
+import { fmtDate, fmtDateTime, cn } from "@/lib/utils";
 import {
   PROVIDER_LABELS,
   PROVIDER_LIST,
@@ -58,6 +58,9 @@ export interface AiCredInitial {
   cooldownUntil: string | null;
   lastError: string | null;
   consecutiveErrors: number;
+  successCount: number;
+  failureCount: number;
+  lastFailureAt: string | null;
 }
 
 interface Props {
@@ -593,6 +596,8 @@ function AiSection({ initial }: { initial: AiCredInitial[] }) {
   });
 
   const activeCount = creds.filter((c) => c.hasKey && c.enabled).length;
+  const successTotal = creds.reduce((sum, cred) => sum + cred.successCount, 0);
+  const failureTotal = creds.reduce((sum, cred) => sum + cred.failureCount, 0);
   const rotationOrder = creds
     .filter((c) => c.hasKey && c.enabled)
     .sort((a, b) => {
@@ -631,7 +636,7 @@ function AiSection({ initial }: { initial: AiCredInitial[] }) {
         <div className="mt-4 p-3 rounded-lg bg-accent/5 border border-accent/20 text-xs">
           <div className="font-semibold text-fg flex items-center gap-1.5 mb-1.5">
             <Zap className="size-3.5 text-accent" />
-            Pembagian beban free-tier (priority dipakai untuk fallback):
+            Pembagian beban free-tier dengan fallback adaptif:
           </div>
           <div className="flex items-center gap-1.5 flex-wrap">
             {rotationOrder.map((label, i) => (
@@ -644,9 +649,36 @@ function AiSection({ initial }: { initial: AiCredInitial[] }) {
             ))}
           </div>
           <p className="text-muted mt-1.5">
-            Bobot dinormalisasi dari provider yang aktif. Jika provider terpilih
-            gagal, sistem mengikuti urutan priority sebagai fallback.
+            Bobot dinormalisasi dari provider sehat. Jika provider terpilih
+            gagal, provider yang paling lama belum sukses mendapat giliran;
+            Gemini didahulukan jika belum ada riwayat, lalu priority menjadi
+            penentu terakhir.
           </p>
+        </div>
+      )}
+
+      {(successTotal > 0 || failureTotal > 0) && (
+        <div className="mt-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
+          {creds
+            .filter((cred) => cred.hasKey)
+            .map((cred) => {
+              const total = cred.successCount + cred.failureCount;
+              const rate =
+                total === 0 ? 0 : Math.round((cred.successCount / total) * 100);
+              return (
+                <div key={cred.provider} className="rounded-lg border border-border bg-bg-elev/60 p-2.5">
+                  <div className="font-medium text-fg">
+                    {PROVIDER_LABELS[cred.provider]}
+                  </div>
+                  <div className="mt-0.5 text-muted">
+                    {cred.successCount} sukses · {cred.failureCount} gagal
+                  </div>
+                  <div className="mt-1 font-semibold text-accent">
+                    {total > 0 ? `${rate}% berhasil` : "belum dipakai"}
+                  </div>
+                </div>
+              );
+            })}
         </div>
       )}
 
@@ -706,6 +738,8 @@ function ProviderRow({
   const label = PROVIDER_LABELS[cred.provider];
   const cooling =
     !!cred.cooldownUntil && new Date(cred.cooldownUntil).getTime() > Date.now();
+  const needsAccountAction =
+    !!cred.lastError && /\[(401|402|403)\]/.test(cred.lastError);
 
   async function save() {
     if (!apiKey.trim() && !cred.hasKey) {
@@ -737,6 +771,9 @@ function ProviderRow({
       cooldownUntil: null,
       lastError: null,
       consecutiveErrors: 0,
+      successCount: cred.successCount,
+      failureCount: cred.failureCount,
+      lastFailureAt: cred.lastFailureAt,
     });
     setApiKey("");
     setExpanded(false);
@@ -757,6 +794,7 @@ function ProviderRow({
       lastError: null,
       consecutiveErrors: 0,
       lastUsed: new Date().toISOString(),
+      successCount: cred.successCount + 1,
     });
   }
 
@@ -785,6 +823,9 @@ function ProviderRow({
       cooldownUntil: null,
       lastError: null,
       consecutiveErrors: 0,
+      successCount: 0,
+      failureCount: 0,
+      lastFailureAt: null,
     });
     setApiKey("");
     setExpanded(true);
@@ -873,7 +914,11 @@ function ProviderRow({
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-semibold text-sm">{label}</span>
             {cred.hasKey ? (
-              cred.enabled && cooling ? (
+              cred.enabled && needsAccountAction ? (
+                <span className="badge bg-red-500/10 text-red-600 dark:text-red-300 text-[10px]">
+                  perlu tindakan
+                </span>
+              ) : cred.enabled && cooling ? (
                 <span className="badge status-pending text-[10px]">cooldown</span>
               ) : cred.enabled ? (
                 <span className="badge status-selesai text-[10px]">aktif</span>
@@ -894,12 +939,21 @@ function ProviderRow({
             ) : null}
           </div>
           <div className="text-[11px] text-muted">{howto.freeTier}</div>
-          {cooling && (
-            <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-0.5">
-              Cooldown sampai {fmtDate(cred.cooldownUntil!)}
-              {cred.lastError ? ` · ${cred.lastError}` : ""}
+          {cred.hasKey && (
+            <div className="text-[11px] text-muted mt-0.5">
+              {cred.successCount} request sukses · {cred.failureCount} gagal
             </div>
           )}
+          {needsAccountAction ? (
+            <div className="text-[11px] text-red-600 dark:text-red-300 mt-0.5">
+              API key/account perlu diperbaiki · {cred.lastError}
+            </div>
+          ) : cooling ? (
+            <div className="text-[11px] text-amber-600 dark:text-amber-400 mt-0.5">
+              Cooldown sampai {fmtDateTime(cred.cooldownUntil!)}
+              {cred.lastError ? ` · ${cred.lastError}` : ""}
+            </div>
+          ) : null}
         </div>
 
         {/* Priority controls + power toggle */}

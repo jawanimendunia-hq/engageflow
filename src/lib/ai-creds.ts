@@ -28,9 +28,7 @@ export async function loadAiCreds(): Promise<
 
   const { data, error } = await supabase
     .from("ai_credentials")
-    .select(
-      "id, provider, api_key_encrypted, model, priority, enabled, cooldown_until"
-    )
+    .select("*")
     .eq("user_id", user.id)
     .eq("enabled", true)
     .order("priority", { ascending: true });
@@ -82,6 +80,7 @@ export async function loadAiCreds(): Promise<
       model: row.model ?? PROVIDERS[provider].defaultModel,
       priority: row.priority ?? 100,
       enabled: row.enabled,
+      lastUsedAt: row.last_used_at ?? null,
     });
   }
 
@@ -110,15 +109,30 @@ export async function loadAiCreds(): Promise<
  */
 export async function markCredentialUsed(credId: string) {
   const supabase = createClient();
-  await supabase
+  const { data } = await supabase
+    .from("ai_credentials")
+    .select("success_count")
+    .eq("id", credId)
+    .maybeSingle();
+
+  const corePatch = {
+    last_used_at: new Date().toISOString(),
+    cooldown_until: null,
+    last_error: null,
+    consecutive_errors: 0,
+  };
+  const { error } = await supabase
     .from("ai_credentials")
     .update({
-      last_used_at: new Date().toISOString(),
-      cooldown_until: null,
-      last_error: null,
-      consecutive_errors: 0,
+      ...corePatch,
+      success_count: Number(data?.success_count ?? 0) + 1,
     })
     .eq("id", credId);
+
+  // Tetap kompatibel jika aplikasi ter-deploy sebelum migration statistik.
+  if (error) {
+    await supabase.from("ai_credentials").update(corePatch).eq("id", credId);
+  }
 }
 
 /** Simpan circuit-breaker agar request berikutnya tidak menghantam provider gagal. */
@@ -129,19 +143,30 @@ export async function markCredentialFailure(
   const supabase = createClient();
   const { data } = await supabase
     .from("ai_credentials")
-    .select("consecutive_errors")
+    .select("consecutive_errors, failure_count")
     .eq("id", credId)
     .maybeSingle();
 
   const cooldownUntil = new Date(
     Date.now() + Math.max(1, failure.retryAfterSec) * 1000
   ).toISOString();
-  await supabase
+  const requiresBilling = failure.reason.includes("[402]");
+  const corePatch = {
+    cooldown_until: cooldownUntil,
+    last_error: failure.reason.slice(0, 1000),
+    consecutive_errors: (data?.consecutive_errors ?? 0) + 1,
+    ...(requiresBilling ? { enabled: false } : {}),
+  };
+  const { error } = await supabase
     .from("ai_credentials")
     .update({
-      cooldown_until: cooldownUntil,
-      last_error: failure.reason.slice(0, 1000),
-      consecutive_errors: (data?.consecutive_errors ?? 0) + 1,
+      ...corePatch,
+      failure_count: Number(data?.failure_count ?? 0) + 1,
+      last_failure_at: new Date().toISOString(),
     })
     .eq("id", credId);
+
+  if (error) {
+    await supabase.from("ai_credentials").update(corePatch).eq("id", credId);
+  }
 }

@@ -30,6 +30,7 @@ create table if not exists public.links (
   campaign_id uuid not null references public.campaigns(id) on delete cascade,
   url text not null,
   kategori text not null,
+  source_keywords text[] not null default '{}',
   status text not null default 'pending'
     check (status in ('pending', 'proses', 'selesai')),
   created_at timestamptz default now()
@@ -114,6 +115,9 @@ create table if not exists public.ai_credentials (
   last_error text,
   consecutive_errors int not null default 0,
   last_used_at timestamptz,
+  success_count bigint not null default 0,
+  failure_count bigint not null default 0,
+  last_failure_at timestamptz,
   created_at timestamptz default now(),
   updated_at timestamptz default now(),
   unique(user_id, provider)
@@ -122,6 +126,8 @@ create table if not exists public.ai_credentials (
 -- ============= INDEXES =============
 create index if not exists idx_links_campaign on public.links(campaign_id);
 create index if not exists idx_links_kategori on public.links(kategori);
+create index if not exists idx_links_source_keywords
+  on public.links using gin(source_keywords);
 create index if not exists idx_comments_user_kat on public.comments(user_id, kategori);
 create index if not exists idx_assignments_link on public.assignments(link_id);
 create index if not exists idx_accounts_user on public.accounts(user_id);

@@ -93,24 +93,61 @@ const VALID_TONES: Tone[] = ["pertanyaan", "santai", "testimoni", "reaksi"];
  */
 export function parseCommentsJson(text: string): GeneratedComment[] {
   const cleaned = text
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
     .replace(/^```(?:json)?\s*/i, "")
     .replace(/\s*```\s*$/i, "")
     .trim();
 
   let parsed: any;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
-    const m = cleaned.match(/\{[\s\S]*\}/);
-    if (m) {
-      try {
-        parsed = JSON.parse(m[0]);
-      } catch {
-        throw new Error(`Response bukan JSON valid: "${cleaned.slice(0, 200)}"`);
+  const candidates = [cleaned];
+
+  // Prioritaskan JSON di markdown fence jika provider masih membungkus output.
+  for (const match of cleaned.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)) {
+    if (match[1]) candidates.push(match[1].trim());
+  }
+
+  // Reasoning model kadang menaruh analisis sebelum object JSON. Ambil object
+  // seimbang yang mengandung key "comments", bukan regex greedy pertama-terakhir.
+  const keyIndex = cleaned.indexOf('"comments"');
+  if (keyIndex >= 0) {
+    for (let start = keyIndex; start >= 0; start--) {
+      if (cleaned[start] !== "{") continue;
+      let depth = 0;
+      let inString = false;
+      let escaped = false;
+      for (let end = start; end < cleaned.length; end++) {
+        const char = cleaned[end];
+        if (inString) {
+          if (escaped) escaped = false;
+          else if (char === "\\") escaped = true;
+          else if (char === '"') inString = false;
+          continue;
+        }
+        if (char === '"') inString = true;
+        else if (char === "{") depth++;
+        else if (char === "}" && --depth === 0) {
+          candidates.push(cleaned.slice(start, end + 1));
+          start = -1;
+          break;
+        }
       }
-    } else {
-      throw new Error(`Response bukan JSON: "${cleaned.slice(0, 200)}"`);
     }
+  }
+
+  for (const candidate of candidates) {
+    try {
+      const value = JSON.parse(candidate);
+      if (Array.isArray(value?.comments)) {
+        parsed = value;
+        break;
+      }
+    } catch {
+      // Coba kandidat berikutnya.
+    }
+  }
+
+  if (!parsed) {
+    throw new Error(`Response bukan JSON valid: "${cleaned.slice(0, 200)}"`);
   }
 
   const comments = parsed?.comments;
