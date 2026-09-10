@@ -85,7 +85,7 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
       {children}
       {dialog && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/40 p-4 backdrop-blur-md animate-glass-fade"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/35 p-4 animate-glass-fade"
           role="presentation"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) close(false);
@@ -96,18 +96,15 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
             aria-modal="true"
             aria-labelledby="glass-dialog-title"
             aria-describedby="glass-dialog-description"
-            className="glass-dialog relative w-full max-w-md overflow-hidden rounded-3xl border border-white/50 bg-white/80 p-6 shadow-2xl shadow-slate-950/25 backdrop-blur-2xl dark:border-white/10 dark:bg-zinc-900/80"
+            className="glass-dialog relative w-full max-w-md overflow-hidden rounded-[32px] border border-border bg-white p-7"
           >
-            <div className="pointer-events-none absolute -right-16 -top-16 size-40 rounded-full bg-accent/20 blur-3xl" />
-            <div className="pointer-events-none absolute -bottom-20 -left-14 size-44 rounded-full bg-sky-400/15 blur-3xl" />
-
             <div className="relative flex gap-4">
               <div
                 className={cn(
-                  "flex size-11 shrink-0 items-center justify-center rounded-2xl border shadow-sm backdrop-blur-xl",
+                  "flex size-11 shrink-0 items-center justify-center rounded-2xl border",
                   danger
-                    ? "border-red-300/50 bg-red-500/15 text-red-600 dark:border-red-400/20 dark:text-red-300"
-                    : "border-accent/20 bg-accent/10 text-accent"
+                    ? "border-[#f34646]/30 bg-[#f34646]/15 text-[#d93232]"
+                    : "border-[#466cf3]/25 bg-[#466cf3]/10 text-[#466cf3]"
                 )}
               >
                 {danger ? (
@@ -138,7 +135,7 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
                   type="button"
                   autoFocus
                   onClick={() => close(false)}
-                  className="btn-secondary !bg-white/40 dark:!bg-white/5"
+                  className="btn-ghost border border-black"
                 >
                   {dialog.cancelText ?? "Batal"}
                 </button>

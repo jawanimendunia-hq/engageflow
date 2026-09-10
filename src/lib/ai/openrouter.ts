@@ -101,7 +101,7 @@ export const openrouter: ProviderClient = {
           },
           { role: "user", content: buildPrompt(args) },
         ],
-        temperature: 0.95,
+        temperature: 0.75,
         max_tokens: outputTokenLimit(args.count),
         response_format: commentResponseFormat(args.count),
         provider: { require_parameters: true },
@@ -145,6 +145,6 @@ export const openrouter: ProviderClient = {
           ? rawContent.map((part: any) => part?.text ?? "").join("")
           : "";
     if (!text) throw new ProviderError(NAME, 200, "Response kosong");
-    return parseCommentsJson(text);
+    return parseCommentsJson(text, args);
   },
 };

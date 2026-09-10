@@ -62,7 +62,7 @@ export const gemini: ProviderClient = {
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
-            temperature: 0.95,
+            temperature: 0.75,
             maxOutputTokens: outputTokenLimit(args.count),
             responseMimeType: "application/json",
             thinkingConfig: { thinkingBudget: 0 },
@@ -127,6 +127,6 @@ export const gemini: ProviderClient = {
       );
     }
 
-    return parseCommentsJson(text);
+    return parseCommentsJson(text, args);
   },
 };

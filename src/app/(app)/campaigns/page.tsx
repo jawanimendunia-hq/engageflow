@@ -14,7 +14,7 @@ export default async function CampaignsPage() {
     .order("created_at", { ascending: false });
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
+    <div className="page-shell">
       <div className="flex items-end justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Campaign</h1>

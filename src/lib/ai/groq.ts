@@ -68,7 +68,7 @@ export const groq: ProviderClient = {
       body: JSON.stringify({
         model,
         messages: [{ role: "user", content: prompt }],
-        temperature: 0.95,
+        temperature: 0.75,
         max_completion_tokens: outputTokenLimit(args.count),
         response_format: { type: "json_object" },
         ...(model.startsWith("qwen/") ? { reasoning_effort: "none" } : {}),
@@ -112,6 +112,6 @@ export const groq: ProviderClient = {
       throw new ProviderError(NAME, 200, "Response kosong");
     }
 
-    return parseCommentsJson(text);
+    return parseCommentsJson(text, args);
   },
 };

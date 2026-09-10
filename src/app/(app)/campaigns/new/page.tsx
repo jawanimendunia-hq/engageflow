@@ -46,7 +46,7 @@ export default function NewCampaignPage() {
   }
 
   return (
-    <div className="p-8 max-w-xl mx-auto">
+    <div className="page-shell max-w-xl">
       <Link
         href="/campaigns"
         className="inline-flex items-center gap-1 text-sm text-muted hover:text-fg mb-6"

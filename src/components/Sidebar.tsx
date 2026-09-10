@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
-import { ThemeToggle } from "./ThemeProvider";
 import { Logo } from "./Logo";
 import { useState } from "react";
 
@@ -39,14 +38,19 @@ export default function Sidebar({ email }: { email: string }) {
   }
 
   return (
-    <aside className="sticky top-0 flex h-dvh w-60 shrink-0 self-start flex-col overflow-hidden border-r border-border bg-bg-elev shadow-[8px_0_30px_rgba(15,23,42,0.03)]">
-      <div className="p-5 border-b border-border flex items-center justify-center">
+    <aside className="app-sidebar flex shrink-0 self-start flex-col overflow-hidden">
+      <div className="app-sidebar-header flex items-center border-b border-border p-5">
         <Link href="/dashboard" aria-label="EngageFlow — ke dashboard">
-          <Logo size={56} className="text-fg" />
+          <span className="brand-lockup">
+            <span className="brand-mark">
+              <Logo size={25} className="text-fg" />
+            </span>
+            <span className="brand-name">engageflow</span>
+          </span>
         </Link>
       </div>
 
-      <nav className="min-h-0 flex-1 overflow-y-auto p-3 space-y-1">
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto p-3">
         {items.map(({ href, label, icon: Icon }) => {
           const active =
             pathname === href ||
@@ -55,34 +59,35 @@ export default function Sidebar({ email }: { email: string }) {
             <Link
               key={href}
               href={href}
+              aria-current={active ? "page" : undefined}
               className={cn(
-                "flex items-center gap-3 px-3 py-2 rounded-md text-sm transition-colors",
+                "sidebar-link flex items-center gap-3 px-4 py-3 text-sm font-medium transition-colors",
                 active
-                  ? "bg-bg-card text-fg border border-border shadow-card"
-                  : "text-muted hover:text-fg hover:bg-bg-card/60"
+                  ? "sidebar-link-active"
+                  : "text-muted hover:text-fg"
               )}
             >
               <Icon className="size-4" />
-              {label}
+              <span>{label}</span>
             </Link>
           );
         })}
       </nav>
 
-      <div className="p-3 border-t border-border space-y-2">
-        <div className="flex items-center justify-between gap-2">
-          <div
-            className="px-2 py-1 text-xs text-muted truncate min-w-0 flex-1"
-            title={email}
-          >
-            {email}
+      <div className="app-sidebar-footer space-y-2 border-t border-border p-3">
+        <div className="flex items-center gap-3 rounded-2xl bg-bg-elev px-3 py-3">
+          <div className="grid size-8 shrink-0 place-items-center rounded-full bg-[#466cf3] text-xs font-bold text-white">
+            {email.charAt(0).toUpperCase() || "E"}
           </div>
-          <ThemeToggle />
+          <div className="min-w-0">
+            <div className="text-[10px] font-medium uppercase tracking-wider text-muted">Workspace</div>
+            <div className="truncate text-xs font-medium" title={email}>{email}</div>
+          </div>
         </div>
         <button
           onClick={logout}
           disabled={loggingOut}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm text-muted hover:text-fg hover:bg-bg-card/60"
+          className="sidebar-link flex w-full items-center gap-3 px-4 py-2.5 text-sm text-muted transition-colors hover:text-fg"
         >
           {loggingOut ? (
             <LoaderCircle className="size-4 animate-spin" />

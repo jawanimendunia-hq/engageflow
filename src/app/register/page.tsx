@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import { Logo } from "@/components/Logo";
+import { AuthShowcase } from "@/components/AuthShowcase";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -36,21 +38,28 @@ export default function RegisterPage() {
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center px-6">
-      <form onSubmit={onSubmit} className="card p-8 w-full max-w-sm">
-        <h1 className="text-2xl font-bold mb-1">Daftar</h1>
-        <p className="text-sm text-muted mb-6">Buat workspace pribadi kamu</p>
+    <main className="auth-shell">
+      <AuthShowcase />
+      <section className="auth-form-wrap">
+      <form onSubmit={onSubmit} className="auth-form">
+        <Link href="/" className="brand-lockup" aria-label="Kembali ke beranda">
+          <span className="brand-mark"><Logo size={25} className="text-fg" /></span>
+          <span className="brand-name">engageflow</span>
+        </Link>
 
-        <label className="text-xs text-muted mb-1 block">Email</label>
+        <h1 className="mb-2">Buat workspace</h1>
+        <p className="mb-8 text-sm text-muted">Mulai organisir komentar dengan alur yang lebih rapi.</p>
+
+        <label className="mb-1.5 block text-xs font-medium">Email</label>
         <input
-          className="input mb-3"
+          className="input mb-4"
           type="email"
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
 
-        <label className="text-xs text-muted mb-1 block">Password (min 6)</label>
+        <label className="mb-1.5 block text-xs font-medium">Password (min. 6 karakter)</label>
         <input
           className="input mb-4"
           type="password"
@@ -61,12 +70,12 @@ export default function RegisterPage() {
         />
 
         {err && (
-          <div className="mb-4 text-xs text-red-600 dark:text-red-400 bg-red-500/10 border border-red-500/20 rounded-md px-3 py-2">
+          <div className="mb-4 rounded-2xl border border-[#f34646]/30 bg-[#f34646]/10 px-3 py-2 text-xs text-[#c52f2f]">
             {err}
           </div>
         )}
         {msg && (
-          <div className="mb-4 text-xs text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-md px-3 py-2">
+          <div className="mb-4 rounded-2xl border border-[#466cf3]/30 bg-[#466cf3]/10 px-3 py-2 text-[#2447c5] text-xs">
             {msg}
           </div>
         )}
@@ -75,13 +84,14 @@ export default function RegisterPage() {
           {loading ? "Memproses..." : "Daftar"}
         </button>
 
-        <p className="text-xs text-muted mt-6 text-center">
+        <p className="mt-6 text-center text-xs text-muted">
           Sudah punya akun?{" "}
-          <Link href="/login" className="text-accent hover:underline">
+          <Link href="/login" className="font-semibold text-fg underline decoration-[#e6e51e] decoration-4 underline-offset-2">
             Masuk
           </Link>
         </p>
       </form>
+      </section>
     </main>
   );
 }

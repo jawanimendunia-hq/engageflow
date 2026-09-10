@@ -69,7 +69,7 @@ export default async function CampaignDetailPage({
   const progress = total === 0 ? 0 : Math.round((selesai / total) * 100);
 
   return (
-    <div className="p-8 max-w-6xl mx-auto">
+    <div className="page-shell">
       <Link
         href="/campaigns"
         className="inline-flex items-center gap-1 text-sm text-muted hover:text-fg mb-4"

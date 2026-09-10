@@ -16,7 +16,7 @@ export const maxDuration = 60;
 
 /**
  * POST /api/ai/generate
- * Body: { url, kategori, count, ad_name?, campaign_name?, primary_text?, headline?, description? }
+ * Body: { url, kategori, count, ad_name?, campaign_name?, primary_text?, headline?, description?, avoid_comments? }
  * Response: {
  *   comments: [{ isi, tone }],
  *   used_provider: "gemini" | "cerebras" | "groq" | "openrouter",
@@ -46,6 +46,7 @@ export async function POST(req: Request) {
     primary_text,
     headline,
     description,
+    avoid_comments,
   } = body as {
     url?: string;
     kategori?: string;
@@ -55,29 +56,46 @@ export async function POST(req: Request) {
     primary_text?: string;
     headline?: string;
     description?: string;
+    avoid_comments?: unknown;
   };
 
-  if (!url || !kategori || !count) {
+  const requestedCount = Number(count);
+  if (
+    typeof url !== "string" ||
+    typeof kategori !== "string" ||
+    !url.trim() ||
+    !kategori.trim() ||
+    !Number.isInteger(requestedCount)
+  ) {
     return NextResponse.json(
       { error: "url, kategori, count wajib" },
       { status: 400 }
     );
   }
 
-  if (count < 1 || count > 30) {
+  if (requestedCount < 1 || requestedCount > 30) {
     return NextResponse.json({ error: "count harus 1-30" }, { status: 400 });
   }
 
+  const previousComments = Array.isArray(avoid_comments)
+    ? avoid_comments
+        .filter((value): value is string => typeof value === "string")
+        .map((value) => value.trim().slice(0, 160))
+        .filter(Boolean)
+        .slice(-24)
+    : [];
+
   try {
     const result = await generateWithRotation(ctx.creds, {
-      url,
-      kategori,
-      count,
+      url: url.trim(),
+      kategori: kategori.trim(),
+      count: requestedCount,
       adName: ad_name,
       campaignName: campaign_name,
       primaryText: primary_text,
       headline,
       description,
+      previousComments,
     });
 
     // Persist circuit-breaker provider gagal dan reset provider yang sukses.

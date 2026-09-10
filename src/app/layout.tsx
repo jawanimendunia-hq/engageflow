@@ -1,6 +1,19 @@
 import type { Metadata } from "next";
-import { ThemeProvider } from "@/components/ThemeProvider";
+import { Inter, Poppins } from "next/font/google";
 import "./globals.css";
+
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-inter",
+});
+
+const poppins = Poppins({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-poppins",
+  weight: ["500", "700"],
+});
 
 export const metadata: Metadata = {
   title: "EngageFlow",
@@ -17,31 +30,14 @@ export const metadata: Metadata = {
   manifest: "/site.webmanifest",
 };
 
-// Script ini dijalankan SEBELUM React hydrate, mencegah flash saat reload di mode dark.
-const themeScript = `
-(function() {
-  try {
-    var t = localStorage.getItem('theme') || 'system';
-    var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    var dark = t === 'dark' || (t === 'system' && prefersDark);
-    if (dark) document.documentElement.classList.add('dark');
-  } catch (e) {}
-})();
-`;
-
 export default function RootLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
   return (
-    <html lang="id" suppressHydrationWarning>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
-      </head>
-      <body className="min-h-screen bg-bg text-fg">
-        <ThemeProvider>{children}</ThemeProvider>
-      </body>
+    <html lang="id" className={`${inter.variable} ${poppins.variable}`}>
+      <body className="min-h-screen bg-bg text-fg">{children}</body>
     </html>
   );
 }

@@ -113,7 +113,7 @@ export default function AccountsClient({ initial }: { initial: Account[] }) {
   }
 
   return (
-    <div className="p-8 max-w-4xl mx-auto">
+    <div className="page-shell max-w-4xl">
       <div className="mb-6">
         <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
           <Users className="size-7" /> Akun

@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
-import { ThemeToggle } from "@/components/ThemeProvider";
 import { Logo } from "@/components/Logo";
 
 export default async function Home() {
@@ -12,71 +11,110 @@ export default async function Home() {
   if (user) redirect("/dashboard");
 
   return (
-    <main className="min-h-screen relative overflow-hidden">
-      {/* Soft gradient backdrop */}
-      <div
-        aria-hidden
-        className="absolute inset-0 -z-10 opacity-60"
-        style={{
-          background:
-            "radial-gradient(circle at 20% 0%, rgb(124 92 255 / 0.18), transparent 50%), radial-gradient(circle at 80% 100%, rgb(59 130 246 / 0.15), transparent 50%)",
-        }}
-      />
+    <main className="min-h-screen overflow-hidden">
+      <div className="marketing-shell">
+        <nav className="marketing-nav" aria-label="Navigasi utama">
+          <Link href="/" className="brand-lockup" aria-label="EngageFlow — beranda">
+            <span className="brand-mark"><Logo size={25} className="text-fg" /></span>
+            <span className="brand-name">engageflow</span>
+          </Link>
 
-      <div className="absolute top-6 right-6">
-        <ThemeToggle />
-      </div>
-
-      <div className="min-h-screen flex items-center justify-center px-6 py-16">
-        <div className="max-w-2xl">
-          <Logo size={88} className="text-fg mb-6" />
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full
-                          border border-border bg-bg-card text-xs text-muted mb-6 shadow-card">
-            <span className="size-1.5 rounded-full bg-emerald-500" />
-            Manual workflow · 100% aman · Tidak ada auto-post
+          <div className="marketing-nav-links">
+            <a href="#product">Produk</a>
+            <a href="#features">Fitur</a>
+            <a href="#workflow">Workflow</a>
           </div>
-          <h1 className="text-5xl md:text-6xl font-bold tracking-tight mb-5">
-            Engage<span className="text-accent">Flow</span>
+
+          <div className="marketing-nav-actions">
+            <Link href="/login" className="btn-ghost">Masuk</Link>
+            <Link href="/register" className="btn-secondary">Mulai gratis</Link>
+          </div>
+        </nav>
+
+        <section className="marketing-hero" aria-labelledby="hero-title">
+          <div className="marketing-kicker">
+            <span className="marketing-kicker-dot" />
+            Workflow manual yang terasa otomatis
+          </div>
+          <h1 id="hero-title" className="marketing-title">
+            Komentar lebih rapi <span className="headline-sticker headline-sticker-yellow" aria-hidden>✦</span>
+            kerja lebih cepat <span className="headline-sticker headline-sticker-blue" aria-hidden>↗</span>
           </h1>
-          <p className="text-lg text-muted mb-8 max-w-xl leading-relaxed">
-            Atur, bagi, dan eksekusi komentar pada banyak postingan media sosial
-            secara manual — tapi <span className="text-fg">cepat</span>,{" "}
-            <span className="text-fg">terstruktur</span>, dan{" "}
-            <span className="text-fg">kontekstual</span>. Aplikasi hanya
-            membantu mengorganisir; eksekusi tetap di tangan kamu.
+          <p className="marketing-description">
+            Atur link, akun, dan stok komentar dalam satu kanvas kerja. EngageFlow
+            membagikan tugas dengan cerdas—kamu tetap memegang kendali saat eksekusi.
           </p>
-          <div className="flex flex-wrap gap-3">
-            <Link href="/register" className="btn-primary">
-              Mulai gratis
-            </Link>
-            <Link href="/login" className="btn-secondary">
-              Sudah punya akun
-            </Link>
+          <div className="marketing-actions">
+            <Link href="/register" className="btn-primary">Mulai gratis <span aria-hidden>→</span></Link>
+            <Link href="/login" className="btn-secondary">Buka workspace</Link>
           </div>
+        </section>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-14">
-            {[
-              [
-                "Kategori-aware",
-                "Komentar otomatis dipasangkan ke link sesuai kategori.",
-              ],
-              [
-                "Distribusi cerdas",
-                "Variasi tone, hindari pengulangan, urutan akun acak.",
-              ],
-              [
-                "Mode eksekusi cepat",
-                "1 link per layar, copy + buka link, shortcut keyboard.",
-              ],
-            ].map(([t, d]) => (
-              <div key={t} className="card p-4">
-                <div className="text-sm font-semibold mb-1">{t}</div>
-                <div className="text-xs text-muted leading-relaxed">{d}</div>
-              </div>
-            ))}
+        <section id="product" aria-label="Tampilan produk EngageFlow">
+          <ProductPreview />
+        </section>
+
+        <section id="features" className="feature-grid" aria-label="Fitur utama">
+          {[
+            ["01", "Kategori yang paham konteks", "Komentar dipasangkan ke link berdasarkan kategori supaya setiap respons tetap relevan."],
+            ["02", "Distribusi akun yang cerdas", "Urutan akun diacak, beban dibagi merata, dan pengulangan yang terasa robotik bisa dihindari."],
+            ["03", "Eksekusi fokus, satu per satu", "Satu tugas per layar, copy cepat, buka link, lalu lanjut tanpa kehilangan konteks."],
+          ].map(([number, title, description]) => (
+            <article key={number} className="feature-card">
+              <span className="feature-number">{number}</span>
+              <h2>{title}</h2>
+              <p>{description}</p>
+            </article>
+          ))}
+        </section>
+
+        <section id="workflow" className="mx-auto mt-24 max-w-3xl text-center">
+          <p className="text-sm font-semibold uppercase tracking-[0.16em] text-muted">Siap dipakai</p>
+          <h2 className="mt-4 text-3xl font-bold md:text-5xl">Dari daftar link ke komentar selesai, tanpa workflow yang berantakan.</h2>
+          <div className="marketing-actions">
+            <Link href="/register" className="btn-primary">Buat workspace</Link>
+            <Link href="/login" className="btn-secondary">Masuk</Link>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
+}
+
+function ProductPreview() {
+  return (
+    <div className="product-browser">
+      <div className="product-browser-bar" aria-hidden>
+        <span className="browser-dot bg-[#f34646]" />
+        <span className="browser-dot bg-[#e6e51e]" />
+        <span className="browser-dot bg-[#466cf3]" />
+      </div>
+      <div className="product-canvas">
+        <span className="annotation-tag">Live workspace</span>
+        <span className="peach-wash" aria-hidden />
+        <div className="mock-dashboard" aria-hidden>
+          <div className="mock-sidebar">
+            <div className="mock-brand" />
+            <div className="mock-nav-item" />
+            <div className="mock-nav-item" />
+            <div className="mock-nav-item" />
+            <div className="mock-nav-item" />
+          </div>
+          <div className="mock-content">
+            <div className="mock-heading" />
+            <div className="mock-subheading" />
+            <div className="mock-stat-grid">
+              <div className="mock-stat" />
+              <div className="mock-stat" />
+              <div className="mock-stat" />
+            </div>
+            <div className="mock-panel-row">
+              <div className="mock-panel" />
+              <div className="mock-panel" />
+            </div>
           </div>
         </div>
       </div>
-    </main>
+    </div>
   );
 }

@@ -21,6 +21,8 @@ export interface GenerateArgs {
   primaryText?: string;
   headline?: string;
   description?: string;
+  /** Komentar yang sudah dibuat di batch aktif, untuk mencegah pola berulang. */
+  previousComments?: string[];
 }
 
 /**

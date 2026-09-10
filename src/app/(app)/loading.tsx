@@ -1,6 +1,6 @@
 export default function AppLoading() {
   return (
-    <div className="mx-auto max-w-6xl animate-pulse p-8" aria-label="Memuat">
+    <div className="page-shell max-w-6xl animate-pulse" aria-label="Memuat">
       <div className="mb-8 h-9 w-52 rounded-xl bg-bg-elev" />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {Array.from({ length: 4 }, (_, index) => (

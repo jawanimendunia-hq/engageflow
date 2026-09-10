@@ -75,7 +75,7 @@ export default function SettingsClient({
   aiInitial,
 }: Props) {
   return (
-    <div className="p-6 md:p-10 max-w-4xl mx-auto space-y-6">
+    <div className="page-shell max-w-4xl space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
           <SettingsIcon className="size-7" /> Settings

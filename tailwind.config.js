@@ -5,7 +5,8 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ["Inter", "system-ui", "sans-serif"],
+        sans: ["var(--font-inter)", "Inter", "system-ui", "sans-serif"],
+        display: ["var(--font-poppins)", "Poppins", "system-ui", "sans-serif"],
         mono: ["JetBrains Mono", "ui-monospace", "monospace"],
       },
       colors: {
@@ -27,8 +28,8 @@ module.exports = {
         muted: "rgb(var(--fg-muted) / <alpha-value>)",
       },
       boxShadow: {
-        card: "0 1px 2px rgb(0 0 0 / 0.03), 0 4px 14px rgb(0 0 0 / 0.04)",
-        elev: "0 4px 16px rgb(0 0 0 / 0.06), 0 12px 36px rgb(0 0 0 / 0.08)",
+        card: "none",
+        elev: "0 10px 10px -5px rgb(0 0 0 / 0.2)",
       },
       animation: {
         "fade-in": "fadeIn 0.2s ease-out",

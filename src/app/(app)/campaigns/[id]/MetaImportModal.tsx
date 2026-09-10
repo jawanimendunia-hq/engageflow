@@ -370,6 +370,7 @@ export default function MetaImportModal({
     let linksOk = 0;
     let commentsTotal = 0;
     let failed = 0;
+    const batchCommentHistory: string[] = [];
 
     // Sequential processing
     for (let i = 0; i < rows.length; i++) {
@@ -422,6 +423,7 @@ export default function MetaImportModal({
               primary_text: ad.primary_text,
               headline: ad.headline,
               description: ad.description,
+              avoid_comments: batchCommentHistory.slice(-24),
             }),
           });
           const data = await r.json();
@@ -497,6 +499,9 @@ export default function MetaImportModal({
             .from("assignments")
             .insert(assignmentRows);
           if (aErr) throw new Error(`Insert assignment: ${aErr.message}`);
+          batchCommentHistory.push(
+            ...assignmentRows.map((row) => row.comment_text)
+          );
         }
 
         updateProgress(ad.ad_id, {

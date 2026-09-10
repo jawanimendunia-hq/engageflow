@@ -59,11 +59,11 @@ export default function NavigationFeedback() {
 
   return (
     <div className="pointer-events-none fixed inset-0 z-[90]" aria-live="polite">
-      <div className="absolute inset-x-0 top-0 h-1 overflow-hidden bg-accent/15">
-        <div className="navigation-progress h-full w-1/3 rounded-full bg-accent shadow-[0_0_18px_rgba(124,92,255,0.8)]" />
+      <div className="absolute inset-x-0 top-0 h-1 overflow-hidden bg-black/10">
+        <div className="navigation-progress h-full w-1/3 rounded-full bg-accent" />
       </div>
-      <div className="absolute inset-0 flex items-center justify-center bg-bg/20 backdrop-blur-[2px]">
-        <div className="glass-loading flex items-center gap-3 rounded-2xl border border-white/50 bg-white/70 px-5 py-3 text-sm font-medium shadow-xl backdrop-blur-xl dark:border-white/10 dark:bg-zinc-900/70">
+      <div className="absolute inset-0 flex items-center justify-center bg-bg/35">
+        <div className="glass-loading flex items-center gap-3 rounded-full border border-border bg-white px-5 py-3 text-sm font-medium">
           <span className="loading-orbit" /> Memuat halaman...
         </div>
       </div>

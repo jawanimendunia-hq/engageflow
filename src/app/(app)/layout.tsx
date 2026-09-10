@@ -18,9 +18,9 @@ export default async function AppLayout({
   return (
     <DialogProvider>
       <NavigationFeedback />
-      <div className="min-h-screen flex items-start">
+      <div className="app-frame flex min-h-screen items-start">
         <Sidebar email={user.email ?? ""} />
-        <main className="flex-1 min-w-0">{children}</main>
+        <main className="min-w-0 flex-1">{children}</main>
       </div>
     </DialogProvider>
   );

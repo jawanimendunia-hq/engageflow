@@ -112,13 +112,13 @@ export default async function DashboardPage() {
   const userName = user?.email?.split("@")[0] ?? "kamu";
 
   return (
-    <div className="p-6 md:p-10 max-w-7xl mx-auto">
+    <div className="page-shell">
       {/* Welcome header */}
       <div className="flex flex-wrap items-end justify-between gap-4 mb-8">
         <div>
           <div className="text-sm text-muted mb-1">Selamat datang</div>
           <h1 className="text-3xl md:text-4xl font-bold tracking-tight">
-            Halo, <span className="text-accent">{userName}</span> 👋
+            Halo, <span className="underline decoration-[#e6e51e] decoration-[10px] underline-offset-[-3px]">{userName}</span> 👋
           </h1>
           <p className="text-sm text-muted mt-2 max-w-lg">
             Ringkasan workspace kamu — campaign aktif, antrian per akun, dan
@@ -136,7 +136,7 @@ export default async function DashboardPage() {
           icon={Megaphone}
           label="Campaign"
           value={campaigns.length}
-          tone="violet"
+          tone="yellow"
         />
         <StatCard
           icon={Link2}
@@ -148,13 +148,13 @@ export default async function DashboardPage() {
           icon={MessageSquare}
           label="Total komentar"
           value={grandTotalKomentar}
-          tone="emerald"
+          tone="red"
         />
         <StatCard
           icon={TrendingUp}
           label="Progress global"
           value={`${grandProgress}%`}
-          tone="amber"
+          tone="peach"
           extra={
             <div className="mt-3 h-1.5 bg-bg-elev rounded-full overflow-hidden">
               <div
@@ -442,14 +442,14 @@ function StatCard({
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   value: string | number;
-  tone: "violet" | "blue" | "emerald" | "amber";
+  tone: "yellow" | "blue" | "red" | "peach";
   extra?: React.ReactNode;
 }) {
   const toneClass = {
-    violet: "bg-violet-500/10 text-violet-500",
-    blue: "bg-blue-500/10 text-blue-500",
-    emerald: "bg-emerald-500/10 text-emerald-500",
-    amber: "bg-amber-500/10 text-amber-500",
+    yellow: "bg-[#e6e51e] text-black",
+    blue: "bg-[#466cf3]/10 text-[#466cf3]",
+    red: "bg-[#f34646]/10 text-[#f34646]",
+    peach: "bg-[#ff8562]/15 text-[#b83f20]",
   }[tone];
 
   return (

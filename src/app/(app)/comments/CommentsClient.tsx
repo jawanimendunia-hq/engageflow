@@ -124,7 +124,7 @@ export default function CommentsClient({ initial, usageMap }: Props) {
   }
 
   return (
-    <div className="p-8 max-w-5xl mx-auto">
+    <div className="page-shell max-w-5xl">
       <div className="mb-6">
         <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
           <MessageSquare className="size-7" /> Komentar

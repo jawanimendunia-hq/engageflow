@@ -247,7 +247,7 @@ export default function ExecuteClient({
     const totalPending = accountStats.reduce((s, a) => s + a.pending, 0);
 
     return (
-      <div className="p-8 max-w-3xl mx-auto">
+      <div className="page-shell max-w-3xl">
         <Link
           href={`/campaigns/${campaignId}`}
           className="inline-flex items-center gap-1 text-sm text-muted hover:text-fg mb-6"
@@ -366,7 +366,7 @@ export default function ExecuteClient({
 
   if (currentQueue.length === 0) {
     return (
-      <div className="p-8 max-w-2xl mx-auto">
+      <div className="page-shell max-w-2xl">
         <button
           onClick={() => setSelectedAccount(null)}
           className="inline-flex items-center gap-1 text-sm text-muted hover:text-fg mb-6"
@@ -506,7 +506,7 @@ export default function ExecuteClient({
       </div>
 
       {current && (
-        <div className="flex-1 px-6 py-8 max-w-3xl mx-auto w-full">
+        <div className="page-shell max-w-3xl flex-1">
           {/* Card link */}
           <div className="card p-5 mb-4 animate-slide-up">
             <div className="flex items-center gap-2 mb-2">
