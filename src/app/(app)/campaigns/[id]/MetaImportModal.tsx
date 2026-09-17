@@ -15,6 +15,7 @@ import {
   KeyRound,
   Wand2,
   Clock,
+  RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -24,6 +25,7 @@ import {
 } from "@/lib/meta";
 import { createClient } from "@/lib/supabase/client";
 import type { Account } from "@/lib/types";
+import { createRetryJob, loadRetryJobs, saveRetryJob, planRetryAssignments, cachedRetryComments, getOrCreateImportLink, type ImportRetryJob } from "@/lib/import-retry";
 
 interface Sku {
   kode: string;
@@ -45,6 +47,8 @@ interface Props {
   accounts: Account[];
   skus: Sku[];
   hasAi: boolean;
+  userId: string;
+  retryJobs?: ImportRetryJob[] | null;
 }
 
 type Mode = "by-campaign" | "by-ad";
@@ -96,7 +100,12 @@ export default function MetaImportModal({
   accounts,
   skus,
   hasAi,
+  userId,
+  retryJobs,
 }: Props) {
+  const importingRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const [retryQueue, setRetryQueue] = useState<string[] | null>(null);
   const [creds, setCreds] = useState<CredentialLite[]>([]);
   const [credsLoading, setCredsLoading] = useState(false);
   const [selectedCredId, setSelectedCredId] = useState<string | null>(null);
@@ -148,6 +157,7 @@ export default function MetaImportModal({
   // Reset state saat modal close
   useEffect(() => {
     if (!open) {
+      abortRef.current?.abort();
       setKeywordsText("");
       setCampaigns([]);
       setAds([]);
@@ -158,10 +168,38 @@ export default function MetaImportModal({
       setProgress({});
       setCurrentIdx(0);
       setCancelled(false);
-      cancelledRef.current = false;
+      cancelledRef.current = true;
       setDoneSummary(null);
+      setRetryQueue(null);
     }
   }, [open]);
+
+  useEffect(() => () => {
+    cancelledRef.current = true;
+    abortRef.current?.abort();
+  }, []);
+
+  useEffect(() => {
+    if (!open || !retryJobs?.length) return;
+    setAds(retryJobs.map((job) => job.ad));
+    setChosen(new Set(retryJobs.map((job) => job.ad.ad_id)));
+    setOverrides(Object.fromEntries(retryJobs.map((job) => [job.ad.ad_id, job.kategori])));
+    setProgress(Object.fromEntries(retryJobs.map((job) => [job.ad.ad_id, {
+      ad_id: job.ad.ad_id, status: "error" as const, message: job.error ?? "Import belum selesai.",
+    }])));
+    setDoneSummary({ linksOk: 0, commentsTotal: 0, failed: retryJobs.length });
+    setStep("done");
+    setRetryQueue(retryJobs.map((job) => job.ad.ad_id));
+  }, [open, retryJobs]);
+
+  useEffect(() => {
+    if (!open || !retryQueue || !ads.length) return;
+    const ids = retryQueue;
+    setRetryQueue(null);
+    void doImport(ids);
+    // The queue is consumed after the seeded ads have rendered.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, retryQueue, ads]);
 
   // Auto-detect kategori per ad — HARUS sebelum early return (Rules of Hooks)
   const detected = useMemo(() => {
@@ -327,16 +365,57 @@ export default function MetaImportModal({
   }
 
   async function sleep(ms: number) {
-    return new Promise((r) => setTimeout(r, ms));
+    const signal = abortRef.current?.signal;
+    return new Promise<void>((resolve, reject) => {
+      const stop = () => {
+        clearTimeout(timer);
+        reject(new Error("Import dihentikan. Klik Retry untuk melanjutkan."));
+      };
+      const timer = setTimeout(() => {
+        signal?.removeEventListener("abort", stop);
+        resolve();
+      }, ms);
+      if (signal?.aborted) stop();
+      else signal?.addEventListener("abort", stop, { once: true });
+    });
   }
 
-  async function doImport() {
+  async function doImport(retryIds?: string[]) {
+    if (importingRef.current) {
+      setErr("Proses sebelumnya masih berhenti. Tunggu sebentar, lalu klik Retry lagi.");
+      return;
+    }
+    importingRef.current = true;
+    try {
+      const run = async () => performImport(retryIds);
+      if (navigator.locks) {
+        await navigator.locks.request(`engageflow-import:${userId}:${campaignId}`, { ifAvailable: true }, async (lock) => {
+          if (!lock) { setErr("Import campaign ini sedang berjalan di tab lain. Tunggu sampai selesai."); return; }
+          await run();
+        });
+      } else {
+        await run();
+      }
+    } catch (error) {
+      setErr((error as Error).message);
+    } finally {
+      importingRef.current = false;
+      onComplete();
+    }
+  }
+
+  async function performImport(retryIds?: string[]) {
+    const saved = loadRetryJobs(userId, campaignId);
     const rows = ads
-      .filter((a) => chosen.has(a.ad_id) && a.post_url)
-      .map((a) => ({
-        ad: a,
-        kategori: getKategori(a.ad_id),
-      }))
+      .filter((a) => (retryIds ? retryIds.includes(a.ad_id) : chosen.has(a.ad_id)) && a.post_url)
+      .map((ad) => {
+        const cached = saved.find((job) => job.ad.ad_id === ad.ad_id);
+        const job = retryIds && cached ? cached : {
+          ...(cached ?? createRetryJob(ad, getKategori(ad.ad_id), perLinkCount, useAi)),
+          ad, kategori: getKategori(ad.ad_id), count: perLinkCount, useAi,
+        };
+        return { ad, kategori: job.kategori, job };
+      })
       .filter((r) => r.kategori.trim().length > 0);
 
     if (rows.length === 0) {
@@ -346,12 +425,21 @@ export default function MetaImportModal({
       return;
     }
 
-    if (useAi && accounts.length < perLinkCount) {
+    if (rows.some((row) => !Number.isInteger(row.job.count) || row.job.count < 1 || row.job.count > 30)) {
+      setErr("Jumlah komentar per link harus 1–30.");
+      return;
+    }
+
+    if (rows.some((row) => row.job.useAi && accounts.length < row.job.count)) {
       setErr(
-        `Generate AI butuh minimal ${perLinkCount} akun, sekarang ada ${accounts.length}. Tambah akun di /accounts atau matikan AI.`
+        `Generate AI butuh minimal ${Math.max(...rows.map((row) => row.job.count))} akun, sekarang ada ${accounts.length}. Tambah akun di /accounts atau matikan AI.`
       );
       return;
     }
+
+    // Save the entire queue before the first request, including unstarted rows.
+    for (const row of rows) saveRetryJob(userId, campaignId, row.job);
+    abortRef.current = new AbortController();
 
     setErr(null);
     setStep("importing");
@@ -364,7 +452,7 @@ export default function MetaImportModal({
     for (const r of rows) {
       initProg[r.ad.ad_id] = { ad_id: r.ad.ad_id, status: "pending" };
     }
-    setProgress(initProg);
+    setProgress((previous) => retryIds ? { ...previous, ...initProg } : initProg);
 
     const supabase = createClient();
     let linksOk = 0;
@@ -376,29 +464,36 @@ export default function MetaImportModal({
     for (let i = 0; i < rows.length; i++) {
       if (cancelledRef.current) break;
       setCurrentIdx(i);
-      const { ad, kategori } = rows[i];
+      const { ad, kategori, job } = rows[i];
+      const targetCount = job.count;
+      const persist = (patch: Partial<ImportRetryJob>) => {
+        Object.assign(job, patch, { updatedAt: new Date().toISOString() });
+        saveRetryJob(userId, campaignId, job);
+      };
 
       try {
+        persist({ status: "running", error: undefined, retryAfterSec: undefined });
         // 1) Insert link
         updateProgress(ad.ad_id, { status: "saving-link" });
-        const { data: linkRow, error: linkErr } = await supabase
-          .from("links")
-          .insert({
-            campaign_id: campaignId,
-            url: ad.post_url!,
-            kategori,
-            source_keywords: ad.matched_keywords ?? [],
-            status: "pending",
-          })
-          .select()
-          .single();
-        if (linkErr || !linkRow) {
-          throw new Error(linkErr?.message ?? "Gagal insert link");
-        }
+        const linkRow = await getOrCreateImportLink(supabase, campaignId, job);
+        persist({ linkId: linkRow.id });
 
-        if (!useAi) {
+        if (!job.useAi || linkRow.status === "selesai") {
           // Tanpa AI — link ter-insert, selesai
           updateProgress(ad.ad_id, { status: "done", comments_count: 0 });
+          linksOk++;
+          persist({ status: "done" });
+          continue;
+        }
+
+        const { data: existingAssignments, error: assignmentError } = await supabase.from("assignments")
+          .select("account_id, urutan, comment_text").eq("link_id", linkRow.id);
+        if (assignmentError) throw new Error(assignmentError.message);
+        const existing = existingAssignments ?? [];
+        const missingCount = Math.max(0, targetCount - existing.length);
+        if (!missingCount) {
+          persist({ status: "done" });
+          updateProgress(ad.ad_id, { status: "done", comments_count: existing.length });
           linksOk++;
           continue;
         }
@@ -406,25 +501,26 @@ export default function MetaImportModal({
         // 2) Generate komentar — rotation otomatis di server.
         // Kalau SEMUA provider habis (all_failed + rate_limited), wait & retry.
         updateProgress(ad.ad_id, { status: "generating" });
-        let generated: { isi: string; tone: string }[] = [];
-        let partialComments: { isi: string; tone: string }[] = [];
+        let generated = cachedRetryComments(job, existing);
+        let partialComments = [...job.partialComments, ...generated];
         let usedProvider: string | undefined;
         let attempt = 0;
-        while (true) {
+        while (generated.length < missingCount) {
           attempt++;
           const r = await fetch("/api/ai/generate", {
             method: "POST",
+            signal: abortRef.current?.signal,
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               url: ad.post_url,
               kategori,
-              count: perLinkCount,
+              count: missingCount,
               ad_name: ad.ad_name,
               campaign_name: ad.campaign_name,
               primary_text: ad.primary_text,
               headline: ad.headline,
               description: ad.description,
-              avoid_comments: batchCommentHistory.slice(-24),
+              avoid_comments: [...batchCommentHistory, ...existing.map((item) => item.comment_text).filter(Boolean)].slice(-24),
               partial_comments: partialComments,
             }),
           });
@@ -432,6 +528,7 @@ export default function MetaImportModal({
           if (r.ok) {
             generated = data.comments ?? [];
             usedProvider = data.used_provider_label ?? data.used_provider;
+            persist({ generated, partialComments: [] });
             const fallbackInfo = [
               ...(data.failed_providers ?? []).map(
                 (f: any) => f.kind === "quality"
@@ -452,6 +549,7 @@ export default function MetaImportModal({
           }
           if (Array.isArray(data.partial_comments)) {
             partialComments = data.partial_comments;
+            persist({ partialComments });
           }
           // Retry hanya untuk cooldown pendek. Daily limit tidak ditunggu di UI.
           const waitSec = Math.max(1, Number(data.retry_after_sec ?? 60));
@@ -460,10 +558,10 @@ export default function MetaImportModal({
           if (qualityOnly && partialComments.length > 0 && attempt <= 2) {
             updateProgress(ad.ad_id, {
               status: "generating",
-              message: `${partialComments.length}/${perLinkCount} komentar sudah lolos; melengkapi sisanya.`,
+              message: `${partialComments.length}/${missingCount} komentar sudah lolos; melengkapi sisanya.`,
             });
             await sleep(8000);
-            if (cancelledRef.current) break;
+            if (cancelledRef.current) throw new Error("Import dihentikan. Klik Retry untuk melanjutkan.");
             continue;
           }
           if (data.rate_limited && waitSec <= 120 && attempt <= 2) {
@@ -474,23 +572,24 @@ export default function MetaImportModal({
                 .join(", ") || "cooldown"}), percobaan ${attempt}/2`,
             });
             await sleep((waitSec + Math.random() * 2) * 1000);
-            if (cancelledRef.current) break;
+            if (cancelledRef.current) throw new Error("Import dihentikan. Klik Retry untuk melanjutkan.");
             continue;
           }
           if (data.rate_limited && waitSec > 120) {
             cancelledRef.current = true;
             setCancelled(true);
           }
+          persist({ retryAfterSec: data.rate_limited ? waitSec : undefined });
           // Error non-recoverable
           const detail = data.failed_providers
             ?.map((f: any) => `${f.provider}: ${f.reason}`)
             .join(" | ");
           throw new Error(detail || data.error || "AI gagal");
         }
-        if (cancelledRef.current) break;
+        if (cancelledRef.current) throw new Error("Import dihentikan. Klik Retry untuk melanjutkan.");
 
-        if (generated.length === 0) {
-          throw new Error("AI tidak mengembalikan komentar");
+        if (generated.length < missingCount) {
+          throw new Error("Jumlah komentar AI belum lengkap. Klik Retry untuk melanjutkan.");
         }
 
         // 3) Assignment inline — komentar TIDAK disimpan ke table `comments`
@@ -499,24 +598,37 @@ export default function MetaImportModal({
         updateProgress(ad.ad_id, { status: "assigning" });
 
         // Pasangkan 1:1 akun ↔ komentar (acak urutan akun untuk variasi)
-        const shuffledAccs = [...accounts]
-          .sort(() => Math.random() - 0.5)
-          .slice(0, generated.length);
+        const accountIds = [...job.accountIds, ...[...accounts]
+          .sort(() => Math.random() - 0.5).map((account) => account.id)];
+        const plan = planRetryAssignments(accountIds.filter((id) => accounts.some((account) => account.id === id)), existing, targetCount);
+        if (plan.length < missingCount) throw new Error("Akun untuk assignment tidak cukup. Tambahkan akun lalu retry.");
+        persist({ accountIds: plan.map((item) => item.accountId), generated });
 
-        const assignmentRows = shuffledAccs.map((acc, idx) => ({
+        const assignmentRows = plan.map((item, idx) => ({
           link_id: linkRow.id,
-          account_id: acc.id,
+          account_id: item.accountId,
           comment_id: null,
           comment_text: generated[idx].isi,
           comment_tone: generated[idx].tone,
-          urutan: idx,
+          urutan: item.urutan,
         }));
 
         if (assignmentRows.length > 0) {
-          const { error: aErr } = await supabase
+          // A manual completion while generation was in flight must not reopen it.
+          const { data: latestLink, error: statusError } = await supabase.from("links")
+            .select("status").eq("id", linkRow.id).eq("campaign_id", campaignId).single();
+          if (statusError) throw new Error(statusError.message);
+          if (latestLink.status === "selesai") {
+            persist({ status: "done" });
+            updateProgress(ad.ad_id, { status: "done" });
+            linksOk++;
+            continue;
+          }
+          const { data: inserted, error: aErr } = await supabase
             .from("assignments")
-            .insert(assignmentRows);
+            .upsert(assignmentRows, { onConflict: "link_id,account_id", ignoreDuplicates: true }).select("id");
           if (aErr) throw new Error(`Insert assignment: ${aErr.message}`);
+          commentsTotal += inserted?.length ?? 0;
           batchCommentHistory.push(
             ...assignmentRows.map((row) => row.comment_text)
           );
@@ -524,37 +636,45 @@ export default function MetaImportModal({
 
         updateProgress(ad.ad_id, {
           status: "done",
-          comments_count: assignmentRows.length,
+          comments_count: existing.length + assignmentRows.length,
           used_provider: usedProvider,
         });
         linksOk++;
-        commentsTotal += assignmentRows.length;
+        persist({ status: "done" });
 
       } catch (e: any) {
+        persist({ status: "failed", error: e?.name === "AbortError" ? "Import terhenti karena modal ditutup. Klik Retry untuk melanjutkan." : e?.message ?? "Error" });
         updateProgress(ad.ad_id, {
           status: "error",
-          message: e?.message ?? "Error",
+          message: job.error,
         });
         failed++;
       } finally {
         // Jeda juga setelah gagal: konfigurasi rusak tidak boleh membuat burst.
-        if (useAi && !cancelledRef.current && i < rows.length - 1) {
-          await sleep(8000 + Math.random() * 4000);
+        if (job.useAi && !cancelledRef.current && i < rows.length - 1) {
+          await sleep(8000 + Math.random() * 4000).catch(() => {});
         }
       }
     }
 
-    setDoneSummary({ linksOk, commentsTotal, failed });
+    setDoneSummary((previous) => retryIds && previous ? {
+      linksOk: previous.linksOk + linksOk,
+      commentsTotal: previous.commentsTotal + commentsTotal,
+      failed: Math.max(0, previous.failed - rows.length + failed),
+    } : { linksOk, commentsTotal, failed });
     setStep("done");
   }
 
   function finishAndClose() {
+    cancelledRef.current = true;
+    abortRef.current?.abort();
     onComplete();
     onClose();
   }
 
   function cancelImport() {
     cancelledRef.current = true;
+    abortRef.current?.abort();
     setCancelled(true);
   }
 
@@ -570,7 +690,7 @@ export default function MetaImportModal({
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in"
-      onClick={onClose}
+      onClick={finishAndClose}
     >
       <div
         className="card w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden"
@@ -582,10 +702,14 @@ export default function MetaImportModal({
             <Sparkles className="size-5 text-accent" />
             <h2 className="font-semibold">Import dari Meta Ads</h2>
           </div>
-          <button onClick={onClose} className="btn-ghost p-1.5">
+          <button onClick={finishAndClose} className="btn-ghost p-1.5" aria-label="Tutup import">
             <X className="size-4" />
           </button>
         </div>
+
+        {err && (step === "done" || step === "importing") && (
+          <div className="px-5 pt-3"><ErrBox text={err} /></div>
+        )}
 
         {/* Ad account picker (selalu tampil di atas) */}
         <div className="px-5 py-3 border-b border-border bg-bg-elev/40">
@@ -606,6 +730,7 @@ export default function MetaImportModal({
                 Import dari:
               </label>
               <select
+                disabled={step === "importing"}
                 value={selectedCredId ?? ""}
                 onChange={(e) => {
                   setSelectedCredId(e.target.value);
@@ -1022,7 +1147,7 @@ export default function MetaImportModal({
                   Batal
                 </button>
                 <button
-                  onClick={doImport}
+                  onClick={() => void doImport()}
                   disabled={readyCount === 0}
                   className="btn-primary"
                 >
@@ -1059,6 +1184,7 @@ export default function MetaImportModal({
             progress={progress}
             ads={ads.filter((a) => chosen.has(a.ad_id) && a.post_url)}
             onClose={finishAndClose}
+            onRetry={(adId) => void doImport(adId ? [adId] : Object.values(progress).filter((row) => row.status === "error").map((row) => row.ad_id))}
           />
         )}
       </div>
@@ -1277,11 +1403,13 @@ function DoneSummary({
   progress,
   ads,
   onClose,
+  onRetry,
 }: {
   summary: { linksOk: number; commentsTotal: number; failed: number };
   progress: Record<string, RowProgress>;
   ads: MetaSearchResult[];
   onClose: () => void;
+  onRetry: (adId?: string) => void;
 }) {
   const failed = ads.filter((a) => progress[a.ad_id]?.status === "error");
 
@@ -1336,8 +1464,11 @@ function DoneSummary({
                   key={a.ad_id}
                   className="card p-3 border-red-500/20 bg-red-500/5 text-xs"
                 >
-                  <div className="font-medium text-fg truncate mb-1">
-                    {a.ad_name}
+                  <div className="flex items-center justify-between gap-3 mb-1">
+                    <div className="font-medium text-fg truncate">{a.ad_name}</div>
+                    <button type="button" onClick={() => onRetry(a.ad_id)} className="btn-ghost shrink-0 text-xs" aria-label={`Retry ${a.ad_name}`}>
+                      <RotateCcw className="size-3.5" /> Retry
+                    </button>
                   </div>
                   <div className="text-red-700 dark:text-red-300 break-words">
                     {p?.message ?? "Unknown error"}
@@ -1348,7 +1479,12 @@ function DoneSummary({
           </div>
         )}
       </div>
-      <div className="px-5 py-3 border-t border-border bg-bg-elev/40 flex justify-end">
+      <div className="px-5 py-3 border-t border-border bg-bg-elev/40 flex justify-end gap-2">
+        {failed.length > 0 && (
+          <button type="button" onClick={() => onRetry()} className="btn-ghost">
+            <RotateCcw className="size-4" /> Retry semua gagal ({failed.length})
+          </button>
+        )}
         <button onClick={onClose} className="btn-primary">
           Tutup
         </button>

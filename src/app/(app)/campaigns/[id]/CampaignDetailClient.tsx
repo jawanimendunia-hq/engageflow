@@ -23,6 +23,7 @@ import { parseBulkLinks, cn, fmtDateTime } from "@/lib/utils";
 import { buildAssignments } from "@/lib/assignment";
 import MetaImportModal from "./MetaImportModal";
 import { useDialog } from "@/components/DialogProvider";
+import { createRetryJob, loadRetryJobs, saveRetryJob, removeRetryJobsForLink, retryStorageKey, type ImportRetryJob } from "@/lib/import-retry";
 
 interface Props {
   campaign: Campaign;
@@ -49,6 +50,8 @@ export default function CampaignDetailClient({
   const [counts, setCounts] = useState(assignmentCounts);
   const [showAdd, setShowAdd] = useState(initialLinks.length === 0);
   const [showMeta, setShowMeta] = useState(false);
+  const [retryJobs, setRetryJobs] = useState<ImportRetryJob[]>([]);
+  const [retrySelection, setRetrySelection] = useState<ImportRetryJob[] | null>(null);
   const [bulkText, setBulkText] = useState("");
   const [singleUrl, setSingleUrl] = useState("");
   const [singleKat, setSingleKat] = useState("");
@@ -74,6 +77,55 @@ export default function CampaignDetailClient({
     setLinks(initialLinks);
     setCounts(assignmentCounts);
   }, [initialLinks, assignmentCounts]);
+
+  useEffect(() => {
+    const refreshJobs = () => setRetryJobs(loadRetryJobs(campaign.user_id, campaign.id));
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === retryStorageKey(campaign.user_id, campaign.id)) refreshJobs();
+    };
+    refreshJobs();
+    window.addEventListener("engageflow-import-retry", refreshJobs);
+    window.addEventListener("storage", onStorage);
+    return () => {
+      window.removeEventListener("engageflow-import-retry", refreshJobs);
+      window.removeEventListener("storage", onStorage);
+    };
+  }, [campaign.user_id, campaign.id]);
+
+  function retryImport(jobs: ImportRetryJob[]) {
+    if (!hasAi && jobs.some((job) => job.useAi)) {
+      notify("err", "Aktifkan AI provider di Settings terlebih dahulu.");
+      return;
+    }
+    try {
+      jobs.forEach((job) => saveRetryJob(campaign.user_id, campaign.id, job));
+      setRetrySelection(jobs);
+      setShowMeta(true);
+    } catch (error) {
+      notify("err", (error as Error).message);
+    }
+  }
+
+  function retryLink(link: LinkRow) {
+    const saved = retryJobs.find((job) => job.linkId === link.id || job.ad.post_url === link.url);
+    const job = saved ?? createRetryJob({
+      ad_id: `link:${link.id}`, ad_name: link.kategori, ad_status: "",
+      campaign_id: campaign.id, campaign_name: "", post_url: link.url,
+      page_id: null, post_id: null, primary_text: null, headline: null,
+      description: null, matched_keywords: link.source_keywords,
+    }, link.kategori, campaign.komentar_per_link, true);
+    retryImport([{
+      ...job, linkId: link.id, status: "pending", useAi: true,
+      count: job.useAi ? job.count : campaign.komentar_per_link,
+    }]);
+  }
+
+  const unfinishedJobs = retryJobs.filter((job) => job.status !== "done" && (
+    !job.linkId || !links.some((link) => link.id === job.linkId && (
+      link.status === "selesai" || (counts[link.id] ?? 0) >= job.count
+    ))
+  ));
+  const jobsByLink = new Map(retryJobs.filter((job) => job.linkId).map((job) => [job.linkId!, job]));
 
   async function addBulk() {
     const parsed = parseBulkLinks(bulkText);
@@ -145,6 +197,7 @@ export default function CampaignDetailClient({
       return;
     }
     setLinks((prev) => prev.filter((l) => l.id !== id));
+    removeRetryJobsForLink(campaign.user_id, campaign.id, id);
     notify("ok", "Link dihapus");
   }
 
@@ -462,7 +515,7 @@ export default function CampaignDetailClient({
           </button>
           {metaConnected ? (
             <button
-              onClick={() => setShowMeta(true)}
+              onClick={() => { setRetrySelection(null); setShowMeta(true); }}
               className="btn-secondary"
               title="Import link dari Meta Ads"
             >
@@ -567,6 +620,34 @@ export default function CampaignDetailClient({
         </div>
       )}
 
+      {unfinishedJobs.length > 0 && (
+        <section className="card p-4 mb-4 border-amber-500/30" aria-label="Iklan yang perlu retry">
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <div>
+              <h3 className="text-sm font-semibold flex items-center gap-2"><AlertTriangle className="size-4 text-amber-600" /> {unfinishedJobs.length} iklan belum selesai</h3>
+              <p className="text-xs text-muted mt-1">Konteks retry tersimpan di browser ini, termasuk komentar yang sudah lolos. Retry melanjutkan link yang sama.</p>
+            </div>
+            <button type="button" onClick={() => retryImport(unfinishedJobs)} disabled={showMeta || busy} className="btn-ghost text-xs">
+              <RotateCcw className="size-3.5" /> Retry semua
+            </button>
+          </div>
+          <div className="space-y-2">
+            {unfinishedJobs.map((job) => (
+              <div key={job.ad.ad_id} className="rounded-xl border border-border p-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium truncate" title={job.ad.ad_name}>{job.ad.ad_name}</div>
+                  <p className="text-xs text-red-700 mt-1 break-words">{job.error || "Proses belum selesai atau terhenti. Klik Retry untuk melanjutkan."}</p>
+                  {job.partialComments.length > 0 && <p className="text-xs text-muted mt-1">{job.partialComments.length} komentar lolos disimpan.</p>}
+                </div>
+                <button type="button" onClick={() => retryImport([job])} disabled={showMeta || busy} className="btn-ghost shrink-0 text-xs" aria-label={`Retry ${job.ad.ad_name}`}>
+                  <RotateCcw className="size-3.5" /> Retry
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {links.length === 0 ? (
         <div className="card p-10 text-center text-muted">
           Belum ada link. Tambahkan dulu lalu generate assignment.
@@ -588,7 +669,11 @@ export default function CampaignDetailClient({
                 key={l.id}
                 className="grid min-w-[1100px] grid-cols-[minmax(260px,1fr)_180px_140px_100px_100px_150px_44px] gap-3 px-4 py-2.5 items-center"
               >
-                <a
+                <div className="min-w-0">
+                  {jobsByLink.get(l.id)?.ad.ad_name && (
+                    <div className="text-sm font-medium truncate">{jobsByLink.get(l.id)?.ad.ad_name}</div>
+                  )}
+                  <a
                   href={l.url}
                   target="_blank"
                   rel="noreferrer"
@@ -597,7 +682,8 @@ export default function CampaignDetailClient({
                 >
                   {l.url}
                   <ExternalLink className="size-3 shrink-0 opacity-60" />
-                </a>
+                  </a>
+                </div>
                 <div className="flex flex-wrap gap-1">
                   {(l.source_keywords ?? []).length > 0 ? (
                     l.source_keywords.map((keyword) => (
@@ -622,11 +708,19 @@ export default function CampaignDetailClient({
                   <span className={cn("badge", `status-${l.status}`)}>
                     {l.status}
                   </span>
+                  {jobsByLink.get(l.id)?.status === "failed" && l.status !== "selesai" && (
+                    <div className="text-[10px] text-red-700 mt-1">Import gagal</div>
+                  )}
                 </div>
                 <div className="text-xs text-muted">
                   {l.status === "selesai"
                     ? "selesai"
-                    : `${counts[l.id] ?? 0} / ${campaign.komentar_per_link}`}
+                    : `${counts[l.id] ?? 0} / ${jobsByLink.get(l.id)?.count ?? campaign.komentar_per_link}`}
+                  {hasAi && l.status !== "selesai" && (counts[l.id] ?? 0) < (jobsByLink.get(l.id)?.count ?? campaign.komentar_per_link) && (
+                    <button type="button" onClick={() => retryLink(l)} disabled={showMeta || busy} className="btn-ghost !px-1 !py-1 text-xs mt-1" title="Lengkapi komentar AI tanpa menambah link baru">
+                      <RotateCcw className="size-3" /> {(counts[l.id] ?? 0) === 0 ? "Retry AI" : "Lengkapi AI"}
+                    </button>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -669,17 +763,18 @@ export default function CampaignDetailClient({
 
       <MetaImportModal
         open={showMeta}
-        onClose={() => setShowMeta(false)}
+        onClose={() => { setShowMeta(false); setRetrySelection(null); }}
         onComplete={() => {
           // Refresh page agar data baru muncul
           startTransition(() => router.refresh());
-          notify("ok", "Import selesai");
         }}
         campaignId={campaign.id}
         perLink={campaign.komentar_per_link}
         accounts={accounts}
         skus={skus}
         hasAi={hasAi}
+        userId={campaign.user_id}
+        retryJobs={retrySelection}
       />
     </div>
   );

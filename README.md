@@ -172,6 +172,18 @@ Token di-encrypt AES-256-GCM di database. Read-only access, **tidak ada posting 
 
 Uji regresi lokal tanpa mengonsumsi kuota provider: `npm run test:ai`.
 
+### Retry import / generate yang gagal
+
+- Di ringkasan import, klik **Retry** pada nama iklan yang gagal atau **Retry semua gagal**.
+- Setelah modal ditutup / halaman direfresh, buka halaman detail campaign. Panel **iklan belum selesai** menyediakan retry per iklan dan retry semua, termasuk antrean yang belum sempat diproses.
+- Di daftar link, **Retry AI / Lengkapi AI** tersedia untuk link yang belum selesai dan jumlah komentarnya masih kurang. Ini juga bisa memproses link dari import lama yang tidak memiliki konteks retry tersimpan; untuk link lama, AI hanya mengetahui URL dan kategori, bukan caption/nama iklan aslinya.
+- Konteks iklan, error, serta komentar parsial disimpan di localStorage yang dipisahkan menurut pengguna dan campaign. Data ini bertahan di **browser yang sama**, bukan disinkronkan antarperangkat. Menghapus data browser menghapus konteks tersebut, tetapi link dan assignment yang sudah tersimpan di Supabase tetap ada. Tidak ada token/API key yang disimpan dalam konteks retry.
+- Retry memakai link yang sudah ada, mengecek assignment yang sudah tersimpan, dan hanya melengkapi kekurangannya. Assignment memakai konflik unik `link_id,account_id` dengan `ignoreDuplicates`, sehingga komentar yang sudah tersimpan tidak ditimpa. Link yang sudah selesai tidak dibuatkan assignment baru.
+- Menutup modal menghentikan request client dan antrean berikutnya; request database yang telanjur terkirim masih mungkin selesai. Retry memeriksa hasil database terlebih dahulu. Pada browser yang mendukung Web Locks, satu campaign hanya bisa diimport oleh satu tab browser sekaligus. Ini bukan penguncian lintas perangkat.
+- Retry tidak mengatasi token Meta kedaluwarsa, model/key tidak valid, atau kuota harian habis; perbaiki koneksi / tunggu kuota terlebih dahulu. Fitur ini tidak memerlukan migrasi database.
+
+Uji penyimpanan retry dan query idempotensi lokal: `npm run test:retry`.
+
 ### Workflow multi-akun FB dengan Firefox Multi-Account Containers
 
 EngageFlow tidak menyimpan login Facebook (itu memang batasan keamanan browser). Untuk mengelola 5+ akun FB sekaligus, gunakan extension Firefox berikut:
