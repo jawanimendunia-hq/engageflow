@@ -161,6 +161,17 @@ Saat import, campaign bernama "ON - PURCHASE - **KCM**-FCI - LC - 22/04" akan ot
 
 Token di-encrypt AES-256-GCM di database. Read-only access, **tidak ada posting otomatis** — ini cuma fetch metadata iklan.
 
+### Generate sekitar 300 komentar per hari
+
+- Aktifkan **Groq** (`openai/gpt-oss-20b`) dan **Cerebras** (`gpt-oss-120b`) di Settings, lalu test masing-masing. Gemini dan OpenRouter menjadi cadangan; free tier tidak menjamin kapasitas harian.
+- Empat komentar per postingan berarti sekitar **75 request awal** untuk 300 komentar, bukan 300 request. Kandidat tambahan dihasilkan dalam request yang sama. Repair/fallback menambah request dan pemakaian token.
+- Komentar yang lolos dipertahankan saat quality gate menolak sebagian hasil. Sistem hanya meminta kekurangannya, dengan maksimal satu repair tambahan per request API; retry singkat di modal membawa hasil parsial, bukan mulai dari nol.
+- Batch berjalan berurutan, dengan jeda 8–12 detik setelah hasil sukses maupun gagal. Batas waktu satu pemanggilan provider 12 detik, keseluruhan fallback 45 detik. Jangan menjalankan beberapa batch bersamaan karena semuanya memakai kuota project/organisasi yang sama.
+- Kuota harian dibedakan dari limit menit berdasarkan metadata provider. Jika kuota harian habis, sistem mencoba provider lain; bila tidak ada yang tersedia, batch berhenti, bukan mengulang tiap menit.
+- Periksa kuota request **dan token** akunmu di [Groq Limits](https://console.groq.com/settings/limits), [Cerebras](https://cloud.cerebras.ai/), dan [Google AI Studio](https://aistudio.google.com/rate-limit). Kalau tetap kurang, gunakan paket berbayar dengan batas pengeluaran yang kamu tentukan; aplikasi tidak mengaktifkan billing secara otomatis.
+
+Uji regresi lokal tanpa mengonsumsi kuota provider: `npm run test:ai`.
+
 ### Workflow multi-akun FB dengan Firefox Multi-Account Containers
 
 EngageFlow tidak menyimpan login Facebook (itu memang batasan keamanan browser). Untuk mengelola 5+ akun FB sekaligus, gunakan extension Firefox berikut:

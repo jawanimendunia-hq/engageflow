@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { decrypt } from "@/lib/encryption";
 import { markCredentialUsed } from "@/lib/ai-creds";
 import { PROVIDERS, PROVIDER_LIST, type ProviderName } from "@/lib/ai";
+import { resolveGroqModel } from "@/lib/ai/groq";
 
 /**
  * GET /api/ai/test?provider=gemini
@@ -53,15 +54,18 @@ export async function GET(req: Request) {
     );
   }
 
-  const result = await client.test(apiKey, data.model ?? client.defaultModel);
+  const model = providerName === "groq"
+    ? resolveGroqModel(data.model ?? "")
+    : data.model ?? client.defaultModel;
+  const result = await client.test(apiKey, model);
   if (!result.ok) {
     return NextResponse.json({ error: result.reason }, { status: 400 });
   }
-  await markCredentialUsed(data.id);
+  await markCredentialUsed(data.id, model);
   return NextResponse.json({
     ok: true,
     reply: result.reply,
-    model: data.model,
+    model,
     provider: providerName,
   });
 }

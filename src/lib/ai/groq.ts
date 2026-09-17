@@ -4,7 +4,7 @@
  * Free tier bervariasi per model dan organisasi.
  *
  * Model gratis populer:
- * Model gratis utama: qwen/qwen3.6-27b
+ * Model utama: openai/gpt-oss-20b
  */
 
 import { buildPrompt, parseCommentsJson } from "./prompt";
@@ -20,11 +20,18 @@ import {
 const BASE = "https://api.groq.com/openai/v1/chat/completions";
 const NAME = "groq" as const;
 
+export function resolveGroqModel(model: string): string {
+  return !model || model === "qwen/qwen3.6-27b"
+    ? "openai/gpt-oss-20b"
+    : model;
+}
+
 export const groq: ProviderClient = {
   name: NAME,
-  defaultModel: "qwen/qwen3.6-27b",
+  defaultModel: "openai/gpt-oss-20b",
 
   async test(apiKey, model) {
+    model = resolveGroqModel(model);
     try {
       const res = await fetch(BASE, {
         method: "POST",
@@ -57,10 +64,12 @@ export const groq: ProviderClient = {
   },
 
   async generate(args: GenerateArgs, apiKey, model): Promise<GeneratedComment[]> {
+    model = resolveGroqModel(model);
     const prompt = buildPrompt(args);
 
     const res = await fetch(BASE, {
       method: "POST",
+      signal: args.signal,
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,

@@ -57,6 +57,7 @@ export const cerebras: ProviderClient = {
 
     const res = await fetch(BASE, {
       method: "POST",
+      signal: args.signal,
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,

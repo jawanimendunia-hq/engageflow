@@ -1,6 +1,7 @@
 /**
  * OpenRouter Free Router — jaringan cadangan terakhir.
- * Router memilih model gratis yang sedang tersedia dan mendukung JSON mode.
+ * Router memilih model gratis yang sedang tersedia. JSON divalidasi lokal
+ * supaya endpoint tanpa structured output tetap dapat menjadi cadangan.
  */
 
 import { buildPrompt, parseCommentsJson } from "./prompt";
@@ -15,37 +16,6 @@ import {
 
 const BASE = "https://openrouter.ai/api/v1/chat/completions";
 const NAME = "openrouter" as const;
-
-function commentResponseFormat(count: number) {
-  return {
-    type: "json_schema",
-    json_schema: {
-      name: "engageflow_comments",
-      strict: true,
-      schema: {
-        type: "object",
-        properties: {
-          comments: {
-            type: "array",
-            minItems: count,
-            maxItems: count,
-            items: {
-              type: "object",
-              properties: {
-                isi: { type: "string" },
-                tone: { type: "string", enum: ["testimoni"] },
-              },
-              required: ["isi", "tone"],
-              additionalProperties: false,
-            },
-          },
-        },
-        required: ["comments"],
-        additionalProperties: false,
-      },
-    },
-  };
-}
 
 function headers(apiKey: string): Record<string, string> {
   const out: Record<string, string> = {
@@ -90,6 +60,7 @@ export const openrouter: ProviderClient = {
   async generate(args: GenerateArgs, apiKey, model): Promise<GeneratedComment[]> {
     const res = await fetch(BASE, {
       method: "POST",
+      signal: args.signal,
       headers: headers(apiKey),
       body: JSON.stringify({
         model: model || "openrouter/free",
@@ -97,15 +68,14 @@ export const openrouter: ProviderClient = {
           {
             role: "system",
             content:
-              "Kamu adalah JSON API. Kembalikan hanya JSON sesuai schema, tanpa analisis, reasoning, markdown, atau teks pembuka.",
+              "Kamu adalah JSON API. Kembalikan hanya JSON dengan array comments berisi isi dan tone, tanpa analisis, reasoning, markdown, atau teks pembuka.",
           },
           { role: "user", content: buildPrompt(args) },
         ],
         temperature: 0.75,
         max_tokens: outputTokenLimit(args.count),
-        response_format: commentResponseFormat(args.count),
-        provider: { require_parameters: true },
-        plugins: [{ id: "response-healing" }],
+        // Free router harus tetap bisa memilih endpoint tanpa structured output.
+        // JSON dan kualitas tetap divalidasi oleh parser lokal, bukan dilonggarkan.
       }),
     });
     const data = await res.json();

@@ -1,11 +1,12 @@
 import type { RateLimitScope } from "./types";
+import { candidateCount } from "./prompt";
 
 /**
  * Komentar EngageFlow pendek. Hindari meminta 4096 token untuk setiap request
  * kecil karena free tier umumnya juga membatasi token per menit/hari.
  */
 export function outputTokenLimit(count: number): number {
-  return Math.min(4096, Math.max(640, 256 + count * 128));
+  return Math.min(4096, Math.max(640, 256 + candidateCount(count) * 128));
 }
 
 function parseDurationSeconds(raw: string | null): number | null {
@@ -58,17 +59,29 @@ export function readRateLimit(
     Math.max(1, candidates[0] ?? fallbackSeconds)
   );
   const message = String(data?.error?.message ?? data?.message ?? "").toLowerCase();
+  // Google RetryInfo dapat menyebut ~60 detik meskipun quotaId-nya PerDay.
+  // Jangan menyimpulkan periode kuota hanya dari durasi retry.
+  const quotaDetails = JSON.stringify(data?.error?.details ?? []).toLowerCase();
+  const daily = /per.?day|daily|\brpd\b/.test(`${message} ${quotaDetails}`) ||
+    (res.headers.get("x-ratelimit-remaining-requests") === "0" &&
+      res.headers.has("x-ratelimit-reset-requests"));
+  if (daily) {
+    const isGemini = quotaDetails.includes("generativelanguage.googleapis.com");
+    const [hour, minute, second] = new Intl.DateTimeFormat("en-GB", {
+      timeZone: "America/Los_Angeles",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23",
+    }).format(new Date()).split(":").map(Number);
+    const resetSeconds = isGemini
+      ? 86400 - hour * 3600 - minute * 60 - second + 1
+      : parseDurationSeconds(res.headers.get("x-ratelimit-reset-requests")) ?? 86400;
+    return { retryAfterSec: Math.max(retryAfterSec, resetSeconds), scope: "daily" };
+  }
   const scope: RateLimitScope =
-    retryAfterSec >= 60 * 60 ||
-    message.includes("per day") ||
-    message.includes("daily") ||
-    message.includes("rpd")
-      ? "daily"
-      : message.includes("token") || message.includes("tpm")
-        ? "tokens"
-        : retryAfterSec <= 15 * 60
-          ? "minute"
-          : "unknown";
+    message.includes("token") || message.includes("tpm")
+      ? "tokens"
+      : retryAfterSec <= 15 * 60
+        ? "minute"
+        : "unknown";
 
   return { retryAfterSec, scope };
 }

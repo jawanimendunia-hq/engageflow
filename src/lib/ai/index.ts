@@ -13,6 +13,7 @@ import { groq } from "./groq";
 import { openrouter } from "./openrouter";
 import {
   ProviderError,
+  CommentQualityError,
   ProviderRateLimitError,
   type GenerateArgs,
   type GeneratedComment,
@@ -50,11 +51,11 @@ export const PROVIDER_DEFAULT_PRIORITY: Record<ProviderName, number> = {
   openrouter: 40,
 };
 
-/** Pembagian konservatif untuk akun free: Cerebras 50%, Groq 35%, Gemini 15%. */
+/** Gemini free memiliki kuota project kecil; prioritaskan Groq dan Cerebras. */
 export const PROVIDER_FREE_WEIGHTS: Record<ProviderName, number> = {
-  cerebras: 50,
-  groq: 35,
-  gemini: 15,
+  cerebras: 40,
+  groq: 55,
+  gemini: 5,
   openrouter: 0,
 };
 
@@ -84,12 +85,8 @@ export const PROVIDER_MODEL_OPTIONS: Record<
   ],
   groq: [
     {
-      value: "qwen/qwen3.6-27b",
-      label: "qwen/qwen3.6-27b — reasoning dapat dimatikan",
-    },
-    {
       value: "openai/gpt-oss-20b",
-      label: "openai/gpt-oss-20b — cepat dan hemat",
+      label: "openai/gpt-oss-20b — cepat dan hemat, direkomendasikan",
     },
     {
       value: "openai/gpt-oss-120b",
@@ -108,12 +105,17 @@ export interface RotationResult {
   comments: GeneratedComment[];
   /** Provider yang sukses dipakai */
   usedProvider: ProviderName;
+  usedProviders: ProviderName[];
   /** Provider yang dicoba tapi gagal — untuk logging / UI */
   failedProviders: ProviderFailure[];
 }
 
 export class AllProvidersFailedError extends Error {
-  constructor(public failedProviders: ProviderFailure[]) {
+  constructor(
+    public failedProviders: ProviderFailure[],
+    public partialComments: GeneratedComment[] = [],
+    public usedProviders: ProviderName[] = []
+  ) {
     const summary = failedProviders
       .map((f) => `${f.provider}: ${f.reason}`)
       .join(" | ");
@@ -160,10 +162,8 @@ function weightedOrder(creds: ProviderCred[], args: GenerateArgs): ProviderCred[
       const aLast = a.lastUsedAt ? new Date(a.lastUsedAt).getTime() : 0;
       const bLast = b.lastUsedAt ? new Date(b.lastUsedAt).getTime() : 0;
       if (aLast !== bLast) return aLast - bLast;
-      // Jika sama-sama belum pernah dipakai, beri Gemini kesempatan sebelum
-      // Groq agar fallback awal tidak selalu jatuh ke provider yang sama.
-      if (a.provider === "gemini" && b.provider !== "gemini") return -1;
-      if (b.provider === "gemini" && a.provider !== "gemini") return 1;
+      // Jika sama-sama belum pernah dipakai, gunakan prioritas utama. Jangan
+      // sengaja menumpuk fallback ke Gemini yang kuota free-nya kecil.
       return a.priority - b.priority;
     });
 
@@ -192,8 +192,25 @@ export async function generateWithRotation(
   }
 
   const failed: RotationResult["failedProviders"] = [];
+  const accepted = [...(args.partialComments ?? [])];
+  const usedProviders = new Set<ProviderName>();
+  const order = weightedOrder(creds, args);
+  // Maksimal satu repair tambahan, bukan retry tanpa batas per provider.
+  let repairUsed = false;
+  let lastUsedProvider = order[0].provider;
 
-  for (const cred of weightedOrder(creds, args)) {
+  if (accepted.length >= args.count) {
+    return {
+      comments: accepted.slice(0, args.count),
+      usedProvider: lastUsedProvider,
+      usedProviders: [],
+      failedProviders: [],
+    };
+  }
+
+  for (let index = 0; index < order.length; index++) {
+    if (args.signal?.aborted) break;
+    const cred = order[index];
     const client = PROVIDERS[cred.provider];
     if (!client) {
       failed.push({
@@ -207,7 +224,17 @@ export async function generateWithRotation(
     }
 
     try {
-      const comments = await client.generate(args, cred.apiKey, cred.model);
+      const comments = await client.generate({
+        ...args,
+        signal: args.signal
+          ? AbortSignal.any([args.signal, AbortSignal.timeout(12000)])
+          : AbortSignal.timeout(12000),
+        count: args.count - accepted.length,
+        previousComments: [
+          ...(args.previousComments ?? []),
+          ...accepted.map((comment) => comment.isi),
+        ],
+      }, cred.apiKey, cred.model);
       if (comments.length === 0) {
         failed.push({
           provider: cred.provider,
@@ -218,13 +245,36 @@ export async function generateWithRotation(
         });
         continue;
       }
+      accepted.push(...comments);
+      usedProviders.add(cred.provider);
+      lastUsedProvider = cred.provider;
       return {
-        comments,
+        comments: accepted.slice(0, args.count),
         usedProvider: cred.provider,
+        usedProviders: [...usedProviders],
         failedProviders: failed,
       };
     } catch (e) {
-      if (e instanceof ProviderRateLimitError) {
+      if (e instanceof CommentQualityError) {
+        accepted.push(...e.acceptedComments);
+        if (e.acceptedComments.length > 0) {
+          usedProviders.add(cred.provider);
+          lastUsedProvider = cred.provider;
+        }
+        failed.push({
+          provider: cred.provider,
+          reason: e.message,
+          rateLimited: false,
+          retryAfterSec: 0,
+          scope: "unknown",
+          kind: "quality",
+        });
+        // Hanya repair jika ada kemajuan; kegagalan API/kuota tetap di-skip.
+        if (!repairUsed && e.acceptedComments.length > 0) {
+          order.splice(index + 1, 0, cred);
+          repairUsed = true;
+        }
+      } else if (e instanceof ProviderRateLimitError) {
         failed.push({
           provider: cred.provider,
           reason: `${e.message} · ${e.scope}, retry ${e.retryAfterSec}s`,
@@ -233,7 +283,7 @@ export async function generateWithRotation(
           scope: e.scope,
         });
       } else if (e instanceof ProviderError) {
-        const needsAccountAction = [401, 402, 403].includes(e.status);
+        const needsAccountAction = [401, 402, 403, 404].includes(e.status);
         failed.push({
           provider: cred.provider,
           reason: e.message,
@@ -258,7 +308,17 @@ export async function generateWithRotation(
     }
   }
 
-  throw new AllProvidersFailedError(failed);
+  // Deadline dapat habis sebelum provider berikutnya sempat dicoba.
+  if (args.signal?.aborted && failed.length === 0) {
+    failed.push({
+      provider: lastUsedProvider,
+      reason: "Batas waktu generate tercapai",
+      rateLimited: false,
+      retryAfterSec: 30,
+      scope: "unknown",
+    });
+  }
+  throw new AllProvidersFailedError(failed, accepted, [...usedProviders]);
 }
 
 export * from "./types";

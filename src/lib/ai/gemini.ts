@@ -58,6 +58,7 @@ export const gemini: ProviderClient = {
       `${BASE}/models/${model}:generateContent?key=${apiKey}`,
       {
         method: "POST",
+        signal: args.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],

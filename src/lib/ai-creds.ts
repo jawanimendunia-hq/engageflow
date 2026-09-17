@@ -6,6 +6,7 @@ import {
   type ProviderFailure,
   type ProviderName,
 } from "@/lib/ai";
+import { resolveGroqModel } from "@/lib/ai/groq";
 
 /**
  * Load semua AI credential user yang enabled, terurut by priority ascending.
@@ -77,7 +78,9 @@ export async function loadAiCreds(): Promise<
       id: row.id,
       provider,
       apiKey,
-      model: row.model ?? PROVIDERS[provider].defaultModel,
+      model: provider === "groq"
+        ? resolveGroqModel(row.model ?? "")
+        : row.model ?? PROVIDERS[provider].defaultModel,
       priority: row.priority ?? 100,
       enabled: row.enabled,
       lastUsedAt: row.last_used_at ?? null,
@@ -107,7 +110,7 @@ export async function loadAiCreds(): Promise<
 /**
  * Update last_used_at dan pulihkan circuit-breaker provider yang sukses.
  */
-export async function markCredentialUsed(credId: string) {
+export async function markCredentialUsed(credId: string, model?: string) {
   const supabase = createClient();
   const { data } = await supabase
     .from("ai_credentials")
@@ -120,6 +123,7 @@ export async function markCredentialUsed(credId: string) {
     cooldown_until: null,
     last_error: null,
     consecutive_errors: 0,
+    ...(model ? { model } : {}),
   };
   const { error } = await supabase
     .from("ai_credentials")
@@ -140,6 +144,8 @@ export async function markCredentialFailure(
   credId: string,
   failure: ProviderFailure
 ) {
+  // Output kurang bervariasi bukan kegagalan credential: jangan matikan provider.
+  if (failure.kind === "quality") return;
   const supabase = createClient();
   const { data } = await supabase
     .from("ai_credentials")

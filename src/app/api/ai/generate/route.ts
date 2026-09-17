@@ -8,15 +8,42 @@ import {
   AllProvidersFailedError,
   generateWithRotation,
   PROVIDER_LABELS,
+  type ProviderCred,
+  type ProviderFailure,
+  type ProviderName,
 } from "@/lib/ai";
+import { validatePartialComments } from "@/lib/ai/prompt";
 
 // Vercel: izinkan request sampai 60 detik. Multi-provider rotation
 // biasanya lebih cepat dari single-provider retry (langsung skip).
 export const maxDuration = 60;
 
+async function persistOutcome(
+  creds: ProviderCred[],
+  usedProviders: ProviderName[],
+  failures: ProviderFailure[]
+) {
+  const actualFailures = failures.filter((failure) => failure.kind !== "quality");
+  // Jika satu provider memberi hasil parsial lalu kena kuota saat repair,
+  // simpan cooldown-nya. Jangan balapan reset-success dengan update-failure.
+  const successes = usedProviders.filter((provider) =>
+    !actualFailures.some((failure) => failure.provider === provider)
+  );
+  await Promise.all([
+    ...successes.map((provider) => {
+      const cred = creds.find((item) => item.provider === provider);
+      return cred ? markCredentialUsed(cred.id, cred.model) : Promise.resolve();
+    }),
+    ...actualFailures.map((failure) => {
+      const cred = creds.find((item) => item.provider === failure.provider);
+      return cred ? markCredentialFailure(cred.id, failure) : Promise.resolve();
+    }),
+  ]);
+}
+
 /**
  * POST /api/ai/generate
- * Body: { url, kategori, count, ad_name?, campaign_name?, primary_text?, headline?, description?, avoid_comments? }
+ * Body: { url, kategori, count, ad_name?, campaign_name?, primary_text?, headline?, description?, avoid_comments?, partial_comments? }
  * Response: {
  *   comments: [{ isi, tone }],
  *   used_provider: "gemini" | "cerebras" | "groq" | "openrouter",
@@ -47,6 +74,7 @@ export async function POST(req: Request) {
     headline,
     description,
     avoid_comments,
+    partial_comments,
   } = body as {
     url?: string;
     kategori?: string;
@@ -57,6 +85,7 @@ export async function POST(req: Request) {
     headline?: string;
     description?: string;
     avoid_comments?: unknown;
+    partial_comments?: unknown;
   };
 
   const requestedCount = Number(count);
@@ -85,6 +114,11 @@ export async function POST(req: Request) {
         .slice(-24)
     : [];
 
+  // Hasil parsial dari browser tetap harus melewati quality gate di server.
+  const partialComments = validatePartialComments(partial_comments, {
+    count: requestedCount, previousComments,
+  });
+
   try {
     const result = await generateWithRotation(ctx.creds, {
       url: url.trim(),
@@ -96,60 +130,54 @@ export async function POST(req: Request) {
       headline,
       description,
       previousComments,
+      partialComments,
+      signal: AbortSignal.timeout(45000),
     });
 
     // Persist circuit-breaker provider gagal dan reset provider yang sukses.
-    const usedCred = ctx.creds.find((c) => c.provider === result.usedProvider);
-    await Promise.all([
-      usedCred ? markCredentialUsed(usedCred.id) : Promise.resolve(),
-      ...result.failedProviders.map((failure) => {
-        const cred = ctx.creds.find((c) => c.provider === failure.provider);
-        return cred
-          ? markCredentialFailure(cred.id, failure)
-          : Promise.resolve();
-      }),
-    ]);
+    await persistOutcome(ctx.creds, result.usedProviders, result.failedProviders);
 
     return NextResponse.json({
       comments: result.comments,
       used_provider: result.usedProvider,
-      used_provider_label: PROVIDER_LABELS[result.usedProvider],
+      used_provider_label: result.usedProviders.length > 0
+        ? result.usedProviders.map((provider) => PROVIDER_LABELS[provider]).join(" + ")
+        : "Hasil percobaan sebelumnya",
+      used_providers: result.usedProviders,
       failed_providers: result.failedProviders.map((f) => ({
         provider: f.provider,
         reason: f.reason,
         rate_limited: f.rateLimited,
         retry_after_sec: f.retryAfterSec,
         scope: f.scope,
+        kind: f.kind,
       })),
       cooling_providers: ctx.coolingProviders,
     });
   } catch (e) {
     if (e instanceof AllProvidersFailedError) {
-      await Promise.all(
-        e.failedProviders.map((failure) => {
-          const cred = ctx.creds.find((c) => c.provider === failure.provider);
-          return cred
-            ? markCredentialFailure(cred.id, failure)
-            : Promise.resolve();
-        })
-      );
+      await persistOutcome(ctx.creds, e.usedProviders, e.failedProviders);
       // Semua provider gagal — kalau ada yang rate-limited, sinyalkan
       const anyRateLimited = e.failedProviders.some((f) => f.rateLimited);
-      const retryAfterSec = Math.min(
-        ...e.failedProviders.map((f) => f.retryAfterSec)
-      );
+      const rateLimits = e.failedProviders.filter((f) => f.rateLimited);
+      const retryAfterSec = rateLimits.length > 0
+        ? Math.min(...rateLimits.map((f) => f.retryAfterSec))
+        : 0;
       return NextResponse.json(
         {
-          error: "Semua AI provider gagal / habis limit",
+          error: `Generate belum lengkap: ${e.partialComments.length}/${requestedCount} komentar lolos. Cek detail provider.`,
           all_failed: true,
           rate_limited: anyRateLimited,
           retry_after_sec: retryAfterSec,
+          partial_comments: e.partialComments,
+          partial_count: e.partialComments.length,
           failed_providers: e.failedProviders.map((f) => ({
             provider: f.provider,
             reason: f.reason,
             rate_limited: f.rateLimited,
             retry_after_sec: f.retryAfterSec,
             scope: f.scope,
+            kind: f.kind,
           })),
         },
         { status: anyRateLimited ? 429 : 502 }

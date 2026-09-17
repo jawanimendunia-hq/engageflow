@@ -407,6 +407,7 @@ export default function MetaImportModal({
         // Kalau SEMUA provider habis (all_failed + rate_limited), wait & retry.
         updateProgress(ad.ad_id, { status: "generating" });
         let generated: { isi: string; tone: string }[] = [];
+        let partialComments: { isi: string; tone: string }[] = [];
         let usedProvider: string | undefined;
         let attempt = 0;
         while (true) {
@@ -424,6 +425,7 @@ export default function MetaImportModal({
               headline: ad.headline,
               description: ad.description,
               avoid_comments: batchCommentHistory.slice(-24),
+              partial_comments: partialComments,
             }),
           });
           const data = await r.json();
@@ -432,7 +434,9 @@ export default function MetaImportModal({
             usedProvider = data.used_provider_label ?? data.used_provider;
             const fallbackInfo = [
               ...(data.failed_providers ?? []).map(
-                (f: any) => `${f.provider} cooldown ${f.retry_after_sec}s`
+                (f: any) => f.kind === "quality"
+                  ? `${f.provider}: hasil bagus dipertahankan, sisanya dilengkapi`
+                  : `${f.provider} cooldown ${f.retry_after_sec}s`
               ),
               ...(data.cooling_providers ?? []).map(
                 (f: any) => `${f.provider} cooldown ${f.retryAfterSec}s`
@@ -446,8 +450,22 @@ export default function MetaImportModal({
             }
             break;
           }
+          if (Array.isArray(data.partial_comments)) {
+            partialComments = data.partial_comments;
+          }
           // Retry hanya untuk cooldown pendek. Daily limit tidak ditunggu di UI.
           const waitSec = Math.max(1, Number(data.retry_after_sec ?? 60));
+          const qualityOnly = data.failed_providers?.length > 0 &&
+            data.failed_providers.every((failure: any) => failure.kind === "quality");
+          if (qualityOnly && partialComments.length > 0 && attempt <= 2) {
+            updateProgress(ad.ad_id, {
+              status: "generating",
+              message: `${partialComments.length}/${perLinkCount} komentar sudah lolos; melengkapi sisanya.`,
+            });
+            await sleep(8000);
+            if (cancelledRef.current) break;
+            continue;
+          }
           if (data.rate_limited && waitSec <= 120 && attempt <= 2) {
             updateProgress(ad.ad_id, {
               status: "rate-limited",
@@ -512,16 +530,17 @@ export default function MetaImportModal({
         linksOk++;
         commentsTotal += assignmentRows.length;
 
-        // 5) Pace konservatif free-tier: 8–12 detik dengan jitter.
-        if (i < rows.length - 1) {
-          await sleep(8000 + Math.random() * 4000);
-        }
       } catch (e: any) {
         updateProgress(ad.ad_id, {
           status: "error",
           message: e?.message ?? "Error",
         });
         failed++;
+      } finally {
+        // Jeda juga setelah gagal: konfigurasi rusak tidak boleh membuat burst.
+        if (useAi && !cancelledRef.current && i < rows.length - 1) {
+          await sleep(8000 + Math.random() * 4000);
+        }
       }
     }
 

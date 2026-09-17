@@ -5,6 +5,7 @@
  */
 
 import type { GenerateArgs, GeneratedComment, Tone } from "./types";
+import { CommentQualityError } from "./types";
 
 const VALID_TONES: Tone[] = ["pertanyaan", "santai", "testimoni", "reaksi"];
 const BLOCKED_OPENERS = /^(?:udah|udh|sudah|baru|awalnya|beli|sumpah)\b/i;
@@ -113,7 +114,7 @@ export function commentQualityIssues(value: string): string[] {
   return issues;
 }
 
-function candidateCount(requested: number): number {
+export function candidateCount(requested: number): number {
   return Math.min(40, requested + Math.min(5, Math.max(2, Math.ceil(requested / 2))));
 }
 
@@ -188,9 +189,28 @@ Output wajib JSON valid tanpa markdown atau penjelasan:
 Keluarkan tepat ${requestedCandidates} kandidat.`;
 }
 
+/** Browser-supplied retry results are data, never proof of passing validation. */
+export function validatePartialComments(
+  value: unknown,
+  args: Pick<GenerateArgs, "count" | "previousComments">
+): GeneratedComment[] {
+  if (!Array.isArray(value)) return [];
+  const comments = value.slice(0, args.count).flatMap((item) => {
+    if (!item || typeof item !== "object" || typeof item.isi !== "string" || item.isi.length > 160) return [];
+    return [{ isi: item.isi, tone: typeof item.tone === "string" ? item.tone.slice(0, 20) : "santai" }];
+  });
+  try {
+    return parseCommentsJson(JSON.stringify({ comments }), args);
+  } catch (error) {
+    if (error instanceof CommentQualityError) return error.acceptedComments;
+    return [];
+  }
+}
+
 /**
  * Parse respons dan ambil tepat sejumlah komentar berkualitas. Jika kandidat
- * valid kurang, provider dianggap gagal agar orchestrator mencoba fallback.
+ * valid kurang, error membawa hasil yang lolos agar orchestrator hanya
+ * melengkapi kekurangannya, bukan membuang hasil yang sudah berkualitas.
  */
 export function parseCommentsJson(
   text: string,
@@ -297,8 +317,9 @@ export function parseCommentsJson(
       .slice(0, 4)
       .map(([reason, total]) => `${reason}: ${total}`)
       .join(", ");
-    throw new Error(
-      `Quality gate: hanya ${accepted.length}/${requested} komentar lolos${summary ? ` (${summary})` : ""}`
+    throw new CommentQualityError(
+      `Quality gate: hanya ${accepted.length}/${requested} komentar lolos${summary ? ` (${summary})` : ""}`,
+      accepted
     );
   }
 

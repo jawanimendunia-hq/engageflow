@@ -7,6 +7,7 @@ import {
   PROVIDER_LIST,
   type ProviderName,
 } from "@/lib/ai";
+import { resolveGroqModel } from "@/lib/ai/groq";
 
 /**
  * POST /api/ai/save
@@ -50,7 +51,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "api_key wajib" }, { status: 400 });
   }
 
-  const usedModel = model?.trim() || client.defaultModel;
+  const usedModel = providerName === "groq"
+    ? resolveGroqModel(model?.trim() ?? "")
+    : model?.trim() || client.defaultModel;
 
   const test = await client.test(api_key, usedModel);
   if (!test.ok) {
@@ -118,7 +121,9 @@ export async function PATCH(req: Request) {
   const patch: Record<string, any> = { updated_at: new Date().toISOString() };
   if (typeof enabled === "boolean") patch.enabled = enabled;
   if (typeof priority === "number") patch.priority = priority;
-  if (typeof model === "string" && model.trim()) patch.model = model.trim();
+  if (typeof model === "string" && model.trim()) {
+    patch.model = provider === "groq" ? resolveGroqModel(model.trim()) : model.trim();
+  }
   if (enabled === true || (typeof model === "string" && model.trim())) {
     patch.cooldown_until = null;
     patch.last_error = null;

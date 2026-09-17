@@ -23,6 +23,16 @@ export interface GenerateArgs {
   description?: string;
   /** Komentar yang sudah dibuat di batch aktif, untuk mencegah pola berulang. */
   previousComments?: string[];
+  /** Hasil lolos quality gate dari percobaan sebelumnya pada postingan ini. */
+  partialComments?: GeneratedComment[];
+  /** Batas waktu bersama untuk seluruh fallback dalam satu request. */
+  signal?: AbortSignal;
+}
+
+export class CommentQualityError extends Error {
+  constructor(message: string, public acceptedComments: GeneratedComment[]) {
+    super(message);
+  }
 }
 
 /**
@@ -82,4 +92,6 @@ export interface ProviderFailure {
   rateLimited: boolean;
   retryAfterSec: number;
   scope: RateLimitScope;
+  /** Kualitas output tidak berarti API/key provider rusak. */
+  kind?: "quality";
 }

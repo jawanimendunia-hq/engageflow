@@ -558,7 +558,7 @@ const PROVIDER_HOWTO: Record<
       "Daftar di console.groq.com → menu 'API Keys'",
       "Klik 'Create API Key' → Copy key (gsk_...)",
     ],
-    freeTier: "Free: Qwen 3.6 27B · 30 RPM / 1000 RPD dasar",
+    freeTier: "Free: GPT-OSS 20B · batas request dan token mengikuti organisasi",
   },
   openrouter: {
     url: "https://openrouter.ai/settings/keys",
@@ -622,6 +622,11 @@ function AiSection({ initial }: { initial: AiCredInitial[] }) {
           <p className="text-sm text-muted mt-0.5">
             Tiga provider utama membagi beban; OpenRouter Free menjadi jaringan
             cadangan terakhir saat semuanya gagal atau cooldown.
+          </p>
+          <p className="text-xs text-muted mt-2">
+            Target 300 komentar/hari: aktifkan Groq dan Cerebras. Empat komentar
+            per postingan membutuhkan sekitar 75 request awal; fallback dan
+            perbaikan kualitas bisa menambah request. Kuota gratis tidak dijamin.
           </p>
         </div>
         {activeCount > 0 && (
@@ -726,7 +731,9 @@ function ProviderRow({
   const dialog = useDialog();
   const [apiKey, setApiKey] = useState("");
   const [model, setModel] = useState(
-    cred.model || PROVIDER_MODEL_OPTIONS[cred.provider][0].value
+    cred.provider === "groq" && cred.model === "qwen/qwen3.6-27b"
+      ? "openai/gpt-oss-20b"
+      : cred.model || PROVIDER_MODEL_OPTIONS[cred.provider][0].value
   );
   const [showKey, setShowKey] = useState(false);
   const [expanded, setExpanded] = useState(!cred.hasKey);
@@ -739,7 +746,7 @@ function ProviderRow({
   const cooling =
     !!cred.cooldownUntil && new Date(cred.cooldownUntil).getTime() > Date.now();
   const needsAccountAction =
-    !!cred.lastError && /\[(401|402|403)\]/.test(cred.lastError);
+    !!cred.lastError && /\[(401|402|403|404)\]/.test(cred.lastError);
 
   async function save() {
     if (!apiKey.trim() && !cred.hasKey) {
@@ -789,7 +796,9 @@ function ProviderRow({
       return;
     }
     onNotify("ok", `✓ ${label} (${d.model}) merespons: "${d.reply}"`);
+    if (d.model) setModel(d.model);
     onUpdate({
+      model: d.model || model,
       cooldownUntil: null,
       lastError: null,
       consecutiveErrors: 0,
